@@ -322,6 +322,25 @@ check("㉓ 标记为支付时间", oc?.hasPaidTime == true, "\(String(describing
 check("㉔ 不抓状态栏时间", Calendar.current.component(.hour, from: oc?.date ?? Date()) == 11,
       "\(String(describing: oc?.date))")
 
+// 商户「值在标签上方」——系统 OCR 常见排布
+let merchantAbove = """
+13:14
+账单
+稻花驿时尚智选餐厅（黄兴路店）
+-31.68
+支付成功
+2026年11月13日11:43:15
+支付时间
+上海巷鱼餐饮管理服务有限公司
+商户全称
+招商银行储蓄卡（4926）
+支付方式
+"""
+let ma = BillParser.parse(merchantAbove).first
+check("㉕ 商户值在上方也能取到", ma?.merchant == "上海巷鱼餐饮管理服务有限公司", ma?.merchant ?? "nil")
+check("㉖ 分类推断为餐饮", ma?.category == .food, "\(String(describing: ma?.category))")
+check("㉗ 支付方式尾号", ma?.account.contains("4926") == true, ma?.account ?? "nil")
+
 print("\n─────────────────────────────")
 print("通过 \(pass) / \(pass + fail)")
 exit(fail == 0 ? 0 : 1)

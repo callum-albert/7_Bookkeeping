@@ -240,7 +240,67 @@ enum BillParser {
         #"\|\s*([^\|\n]{2,20})\s*\|"#
     ]
 
+    /// 在整段文本里按「标签行」取字段值，兼容三种排布：
+    ///   「商户全称 上海巷鱼」 / 「商户全称\n上海巷鱼」 / 「上海巷鱼\n商户全称」
+    private static func fieldValue(in text: String, labels: [String]) -> String? {
+        let lines = text.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+
+        for (i, line) in lines.enumerated() {
+            guard let label = labels.first(where: { line.contains($0) }) else { continue }
+
+            // a) 同行带值：只取「标签之后」的内容（标签可能在行首或行中）
+            if let r = line.range(of: label) {
+                let rest = String(line[r.upperBound...])
+                    .trimmingCharacters(in: CharacterSet(charactersIn: " :：·-"))
+                if rest.count >= 2, !isNoiseMerchant(rest), !isFieldLabel(rest) { return rest }
+            }
+
+            // b) 上下相邻行都看，取「更像商户名」且更长的那个
+            var candidates: [String] = []
+            if i + 1 < lines.count { candidates.append(lines[i + 1]) }
+            if i - 1 >= 0 { candidates.append(lines[i - 1]) }
+            let valid = candidates.filter { looksLikeMerchant($0) }
+            if let best = valid.max(by: { $0.count < $1.count }) { return best }
+        }
+        return nil
+    }
+
+    /// 判断某行是否像商户名（用于 OCR 值/标签错位的取舍）
+    private static func looksLikeMerchant(_ t: String) -> Bool {
+        guard t.count >= 2, t.count <= 40 else { return false }
+        if isFieldLabel(t) || isNoiseMerchant(t) { return false }
+        // 排除日期、时间、金额、单号
+        if t.contains("年") && t.contains("月") { return false }
+        if t.contains(":") || t.contains("：") { return false }
+        let digits = t.filter { $0.isNumber }.count
+        if digits > t.count / 2 { return false }
+        // 排除"招商银行储蓄卡(4926)"这类支付方式
+        if t.contains("储蓄卡") || t.contains("信用卡") || t.contains("借记卡") { return false }
+        if t.contains("银行") && t.contains("(") { return false }
+        return true
+    }
+
+    private static func isFieldLabel(_ t: String) -> Bool {
+        let labels = ["支付时间", "交易时间", "付款时间", "当前状态", "支付成功", "商品",
+                      "商户全称", "商户名称", "收单机构", "支付方式", "交易单号", "商户单号",
+                      "账单服务", "全部账单", "账单"]
+        return labels.contains { t == $0 || t.hasPrefix($0) }
+    }
+
     static func extractMerchant(_ line: String, full: String) -> String? {
+        // ① 行级双向匹配（最可靠，兼容 OCR 行序）
+        if let v = fieldValue(in: full, labels: ["商户全称", "商户名称", "收款商户", "收款方", "支付对象"]) {
+            return v
+        }
+        if let v = fieldValue(in: full, labels: ["商户"]) {
+            return v
+        }
+        if let v = fieldValue(in: full, labels: ["商品"]) {
+            return v
+        }
+
         for p in merchantPatterns {
             if let m = firstMatch(p, in: line, group: 1) {
                 let t = clean(m)
@@ -258,7 +318,8 @@ enum BillParser {
 
     private static func isNoiseMerchant(_ t: String) -> Bool {
         let fieldNames = ["全称", "名称", "商户", "商户全称", "商户名称", "支付方式", "收单机构",
-                          "交易单号", "商户单号", "商品", "时间", "状态"]
+                          "交易单号", "商户单号", "商品", "时间", "状态",
+                          "储蓄卡", "借记卡", "信用卡", "银行卡", "零钱", "余额宝", "花呗"]
         if fieldNames.contains(t) { return true }
         let noise = ["微信支付", "支付宝", "通知", "服务", "银行", "消费", "支付成功", "付款成功",
                      "交易提醒", "账户", "中国银行", "工商银行", "招商银行", "建设银行", "农业银行"]
