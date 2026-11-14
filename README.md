@@ -34,7 +34,8 @@ iOS 沙盒不允许第三方 App 读取其它 App 的通知内容，这是系统
 
 ## 安装
 
-1. 从 [Releases](https://github.com/callum-albert/7_Bookkeeping/releases) 下载 `7记账.ipa`
+1. 从 [Releases](https://github.com/callum-albert/7_Bookkeeping/releases) 下载 `7jizhang.ipa`
+   （GitHub 会过滤 Release 资产名里的非 ASCII 字符，所以文件名用拼音，App 显示名仍是「7记账」）
 2. 用 SideStore / AltStore / 自有开发者证书签名安装
 3. 主 App 与 `PlugIns/SevenWidgets.appex` 都需要签名（多数工具会自动递归）
 4. 系统要求：iOS 26.0+
