@@ -564,6 +564,7 @@ struct EntryDetailView: View {
                 .padding(.top, 16)
 
                 VStack(spacing: 0) {
+                    // 分类
                     Menu {
                         ForEach(Category.allCases) { c in
                             Button {
@@ -581,40 +582,51 @@ struct EntryDetailView: View {
 
                     Divider().padding(.leading, 16)
 
+                    // 支付方式
+                    detailRow("支付方式", paymentLabel, symbol: "creditcard.fill")
+
+                    Divider().padding(.leading, 16)
+
+                    // 来源（商户）
                     HStack(spacing: 10) {
-                        Image(systemName: "storefront")
+                        Image(systemName: "storefront.fill")
                             .font(.system(size: 13))
                             .foregroundStyle(Theme.brand)
                             .frame(width: 22)
-                        TextField("商户 / 概要", text: merchantBinding)
+                        Text("来源")
                             .font(.system(size: 14))
+                        Spacer(minLength: 8)
+                        TextField("商户名称", text: merchantBinding)
+                            .font(.system(size: 13))
+                            .multilineTextAlignment(.trailing)
+                            .foregroundStyle(.secondary)
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 13)
 
                     Divider().padding(.leading, 16)
-                    detailRow("来源", entry.source.title, symbol: entry.source.symbol)
-                    Divider().padding(.leading, 16)
-                    detailRow("时间",
-                              entry.date.formatted(date: .abbreviated, time: .shortened)
-                                + (entry.hasPaidTime ? "" : "（记账时间）"),
-                              symbol: "clock")
-                }
-                .glassEffect(.regular, in: .rect(cornerRadius: 22))
 
-                if !entry.raw.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("识别原文")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                        Text(entry.raw)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(4)
+                    // 时间（可改）
+                    HStack(spacing: 10) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.brand)
+                            .frame(width: 22)
+                        Text("时间")
+                            .font(.system(size: 14))
+                        Spacer(minLength: 8)
+                        DatePicker("", selection: dateBinding, displayedComponents: [.date, .hourAndMinute])
+                            .labelsHidden()
+                            .datePickerStyle(.compact)
+                            .scaleEffect(0.85, anchor: .trailing)
+                        if !entry.hasPaidTime {
+                            Text("记账时间")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.tertiary)
+                        }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
-                    .glassEffect(.regular, in: .rect(cornerRadius: 18))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 9)
                 }
 
                 Button {
@@ -645,6 +657,39 @@ struct EntryDetailView: View {
                 }
             }
         }
+    }
+
+    /// 支付方式：微信余额 / 支付宝余额 / 招商银行4926 / 花呗 …
+    private var paymentLabel: String {
+        let tail: String = {
+            guard let r = entry.account.range(of: #"\((\d{4})\)"#, options: .regularExpression) else { return "" }
+            return String(entry.account[r]).trimmingCharacters(in: CharacterSet(charactersIn: "()"))
+        }()
+        switch entry.channel {
+        case .wechatZero: return "微信余额"
+        case .alipayBalance: return "支付宝余额"
+        case .wechatCard, .alipayCard, .bank:
+            if let card = Accounts.shared.card(tail: tail), !card.tail.isEmpty {
+                return card.displayName
+            }
+            if !entry.account.isEmpty { return entry.account }
+            return tail.isEmpty ? "银行卡" : "银行卡\(tail)"
+        case .huabei: return "花呗"
+        case .creditCard: return "信用卡"
+        case .unknown:
+            return entry.account.isEmpty ? "未识别" : entry.account
+        }
+    }
+
+    private var dateBinding: Binding<Date> {
+        Binding(
+            get: { entry.date },
+            set: {
+                entry.date = $0
+                entry.hasPaidTime = true      // 用户手动指定即视为支付时间
+                store.update(entry)
+            }
+        )
     }
 
     private var merchantBinding: Binding<String> {
