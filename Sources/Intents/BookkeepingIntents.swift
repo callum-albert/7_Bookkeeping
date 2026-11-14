@@ -1,6 +1,7 @@
 import Foundation
 import AppIntents
 import UIKit
+import Photos
 
 // MARK: - 解析文本记账（给快捷指令/自动化用）
 struct RecordFromTextIntent: AppIntent {
@@ -71,6 +72,54 @@ struct RecordFromImageIntent: AppIntent {
         let total = entries.reduce(0) { $0 + $1.amountCents }
         let first = entries[0]
         return .result(dialog: "已记账 \(total.moneyText) · \(first.merchant)")
+    }
+}
+
+// MARK: - 用相册最新截图记账（绕过快捷指令的截屏动作）
+struct RecordFromLatestScreenshotIntent: AppIntent {
+    static var title: LocalizedStringResource = "用最新截图记账"
+    static var description = IntentDescription("读取相册里最新的一张截图，识别其中的账单信息并记账")
+    static var openAppWhenRun: Bool = false
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        guard let image = await ScreenshotReader.latest() else {
+            return .result()
+        }
+        _ = await AutoBookkeeper.shared.ingestImage(image, source: "最新截图")
+        return .result()
+    }
+}
+
+/// 读取相册最新一张图片
+enum ScreenshotReader {
+    static func latest() async -> UIImage? {
+        let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        guard status == .authorized || status == .limited else { return nil }
+
+        let opts = PHFetchOptions()
+        opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        opts.fetchLimit = 1
+        guard let asset = PHAsset.fetchAssets(with: .image, options: opts).firstObject else { return nil }
+
+        return await withCheckedContinuation { cont in
+            let req = PHImageRequestOptions()
+            req.isSynchronous = false
+            req.deliveryMode = .highQualityFormat
+            req.resizeMode = .none
+            var resumed = false
+            PHImageManager.default().requestImage(
+                for: asset,
+                targetSize: CGSize(width: 1600, height: 1600),
+                contentMode: .aspectFit,
+                options: req
+            ) { img, info in
+                let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                if degraded || resumed { return }
+                resumed = true
+                cont.resume(returning: img)
+            }
+        }
     }
 }
 
@@ -148,6 +197,12 @@ struct BookkeepingShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "剪贴板自动记账",
             systemImageName: "text.badge.checkmark"
+        )
+        AppShortcut(
+            intent: RecordFromLatestScreenshotIntent(),
+            phrases: ["用 \(.applicationName) 识别最新截图", "让 \(.applicationName) 记这张截图"],
+            shortTitle: "用最新截图记账",
+            systemImageName: "photo.on.rectangle.angled"
         )
         AppShortcut(
             intent: RecordFromImageIntent(),

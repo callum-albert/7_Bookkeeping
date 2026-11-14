@@ -1,4 +1,5 @@
 import SwiftUI
+import Photos
 
 struct RootView: View {
     private var _store = State(wrappedValue: LedgerStore.shared)
@@ -32,6 +33,8 @@ struct RootView: View {
         }
         .task {
             await NotificationService.shared.requestIfNeeded()
+            // 「用最新截图记账」需要相册读取权限，提前请求（后台 Intent 无法弹窗）
+            _ = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         }
         .sheet(isPresented: _showCompose.projectedValue) {
             ComposeView()

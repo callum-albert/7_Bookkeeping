@@ -25,6 +25,12 @@ INTENTS = [
         "parameters": [],
     },
     {
+        "identifier": "RecordFromLatestScreenshotIntent",
+        "title": "用最新截图记账",
+        "description": "读取相册里最新的一张截图并识别记账，不需要传参数",
+        "parameters": [],
+    },
+    {
         "identifier": "RecordFromTextIntent",
         "title": "解析账单文本记账",
         "description": "把账单文本交给 7记账 识别金额、商户与分类后入账",
