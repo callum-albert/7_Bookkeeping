@@ -83,6 +83,8 @@ enum BillParser {
             if !started, markers.contains(where: { line.contains($0) }) { started = true }
             if !started { continue }
             if line.hasPrefix("账单服务") || line.hasPrefix("交易服务") { break }
+            // 「商户单号 可在支持的商户扫码退款」这类只是提示，不参与流向判定
+            if line.contains("单号") && line.contains("退款") { continue }
             block.append(line)
         }
         guard !block.isEmpty else { return nil }
@@ -128,15 +130,9 @@ enum BillParser {
         guard let amount = cents, amount > 0 else { return nil }
 
         let source = detectSource(text) ?? (text.contains("支付宝") ? .alipay : .wechat)
-        // 来源：优先「商品」的值（可读的门店名），否则用「商户全称」
-        var merchant = ""
-        if let product = fields["商品"], readableProductName(product) {
-            merchant = product
-        }
-        if merchant.isEmpty {
-            merchant = fields["商户名称"] ?? fields["商户全称"]
-                ?? fields["商家名称"] ?? fields["收款方"] ?? ""
-        }
+        // 来源：优先用「商品」字段的值；没有商品时才用商户全称
+        var merchant = fields["商品"] ?? fields["商户名称"] ?? fields["商户全称"]
+            ?? fields["商家名称"] ?? fields["收款方"] ?? ""
         // 仍为空：用账单页顶部的门店名（金额下方那行）
         if merchant.isEmpty {
             for (i, line) in lines.enumerated() where extractAmount(line) != nil {
@@ -163,7 +159,9 @@ enum BillParser {
         return Parsed(
             amountCents: amount,
             source: source,
-            category: merchant.isEmpty ? .other : Category.guess(from: merchant + " " + (fields["商品"] ?? ""), merchant: merchant),
+            // 分类：用整块文本（含商户全称、商品、收单机构）来推断，不只是来源名
+            category: Category.guess(from: block.joined(separator: " ") + " " + merchant,
+                                     merchant: merchant.isEmpty ? nil : merchant),
             merchant: merchant,
             account: account,
             date: paidDate ?? now,
@@ -317,8 +315,11 @@ enum BillParser {
     ]
 
     static func classify(_ s: String) -> Flow {
-        // 1) 退款/退还 → 收入（"支付成功已退还"）
-        if s.contains("退款") || s.contains("已退还") || s.contains("退票") || s.contains("已退回") {
+        // 1) 退款/退还 → 收入
+        //    注意：只认明确表述。账单页里「可在支持的商户扫码退款」是提示文案，不是退款
+        let refundPhrases = ["退款成功", "退款到账", "已退款", "已退还", "已退回", "原路退回",
+                             "退票成功", "退款金额", "退款完成"]
+        if refundPhrases.contains(where: { s.contains($0) }) {
             return .income
         }
         // 1.5) 花呗还款：按需求算作消费（其余还款仍视为资金转移）

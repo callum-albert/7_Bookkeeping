@@ -284,7 +284,7 @@ let billDetail = """
 金额 ¥31.68
 """
 let bd = BillParser.parse(billDetail).first
-check("⑯ 商户取「商户全称」", bd?.merchant == "上海巷鱼餐饮管理服务有限公司", bd?.merchant ?? "nil")
+check("⑯ 来源取「商品」值", bd?.merchant == "美团收银909700219151774435", bd?.merchant ?? "nil")
 check("⑰ 不会把字段名当商户", bd?.merchant != "全称" && bd?.merchant != "商户全称", bd?.merchant ?? "nil")
 check("⑱ 使用支付时间而非当前时间",
       Calendar.current.component(.day, from: bd?.date ?? Date()) == 13,
@@ -365,7 +365,7 @@ let fullBill = """
 可在支持商户扫码退款
 """
 let fb = BillParser.parse(fullBill).first
-check("㉘ 商户不取单号/退款说明", fb?.merchant == "上海巷鱼餐饮管理服务有限公司", fb?.merchant ?? "nil")
+check("㉘ 来源取商品值（不取单号/退款说明）", fb?.merchant == "美团收银909700219151774435", fb?.merchant ?? "nil")
 check("㉙ 分类为餐饮", fb?.category == .food, "\(String(describing: fb?.category))")
 
 print("\n── 18. 同时有「商品」和「商户全称」时优先商户全称 ──")
@@ -380,7 +380,7 @@ let twoFields1 = """
 2026年11月12日18:20:05
 """
 let mf1 = BillParser.parse(twoFields1).first
-check("㉚ 商品在前也优先商户全称", mf1?.merchant == "杭州知味观餐饮有限公司", mf1?.merchant ?? "nil")
+check("㉚ 来源取商品值", mf1?.merchant == "美团收银12345678", mf1?.merchant ?? "nil")
 check("㉛ 分类为餐饮", mf1?.category == .food, "\(String(describing: mf1?.category))")
 
 let twoFields2 = """
@@ -405,7 +405,7 @@ let didi = """
 2026年11月12日08:15:00
 """
 let d1 = BillParser.parse(didi).first
-check("㉝ 滴滴商户取公司名", d1?.merchant == "广州启安科技有限公司", d1?.merchant ?? "nil")
+check("㉝ 滴滴来源取商品值", d1?.merchant == "先乘车后付款", d1?.merchant ?? "nil")
 check("㉞ 靠「乘车」判为交通", d1?.category == .transport, "\(String(describing: d1?.category))")
 
 let metroCard = """
@@ -450,7 +450,7 @@ T1326517543793922050
 申请电子凭证
 """
 let ad = BillParser.parse(alipayDetail).first
-check("㊲ 模板：商户取商户全称", ad?.merchant == "当家食力鲜厨(上海)餐饮有限公司", ad?.merchant ?? "nil")
+check("㊲ 模板：来源取商品值", ad?.merchant == "【POS】_上海互联宝地店_567850", ad?.merchant ?? "nil")
 check("㊳ 模板：支付时间正确",
       Calendar.current.component(.day, from: ad?.date ?? Date()) == 9, "\(String(describing: ad?.date))")
 check("㊴ 模板：支付时间不被标成记账时间", ad?.hasPaidTime == true, "\(String(describing: ad?.hasPaidTime))")
@@ -477,7 +477,7 @@ let visualLines = """
 在此商户的交易  申请电子凭证
 """
 let vl = BillParser.parse(visualLines).first
-check("㊹ 视觉行：商户正确", vl?.merchant == "当家食力鲜厨(上海)餐饮有限公司", vl?.merchant ?? "nil")
+check("㊹ 视觉行：来源取商品值", vl?.merchant == "【POS】_上海互联宝地店_567850", vl?.merchant ?? "nil")
 check("㊺ 视觉行：来源不是「的交易」", (vl?.merchant ?? "").contains("的交易") == false, vl?.merchant ?? "nil")
 check("㊻ 视觉行：时间正确", Calendar.current.component(.day, from: vl?.date ?? Date()) == 9,
       "\(String(describing: vl?.date))")
@@ -496,7 +496,7 @@ let rentBill = """
 """
 let rb = BillParser.parse(rentBill).first
 check("㊾ 房租识别", rb?.category == .rent, "\(String(describing: rb?.category))")
-check("㊿ 房租商户", rb?.merchant == "链家房屋租赁有限公司", rb?.merchant ?? "nil")
+check("㊿ 房租来源取商品值", rb?.merchant == "房租", rb?.merchant ?? "nil")
 
 let utilBill = """
 支付宝
