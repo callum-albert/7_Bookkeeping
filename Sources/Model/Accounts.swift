@@ -95,7 +95,7 @@ struct BankCard: Codable, Identifiable, Hashable {
         if bankName.isEmpty {
             return tail.isEmpty ? "银行卡" : "尾号\(tail)"
         }
-        return tail.isEmpty ? bankName : "\(bankName)(\(tail))"
+        return tail.isEmpty ? bankName : "\(bankName)\(tail)"
     }
 
     var shortLabel: String {

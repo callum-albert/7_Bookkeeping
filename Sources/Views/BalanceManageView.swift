@@ -19,6 +19,8 @@ struct BalanceManageView: View {
     private var newTail: String { get { _newTail.wrappedValue } nonmutating set { _newTail.wrappedValue = newValue } }
     private var _newBalance = State(wrappedValue: "")
     private var newBalance: String { get { _newBalance.wrappedValue } nonmutating set { _newBalance.wrappedValue = newValue } }
+    private var _editingCard = State<BankCard?>(wrappedValue: nil)
+    private var editingCard: BankCard? { get { _editingCard.wrappedValue } nonmutating set { _editingCard.wrappedValue = newValue } }
 
     var body: some View {
         ScrollView {
@@ -42,6 +44,15 @@ struct BalanceManageView: View {
         }
         .onDisappear {
             accounts.setAll(wechat: cents(wechat), alipay: cents(alipay), bank: accounts.bankTotal)
+        }
+        .sheet(item: Binding(get: { editingCard }, set: { editingCard = $0 })) { card in
+            EditCardSheet(card: card) { updated in
+                accounts.updateCard(updated)
+            } onDelete: {
+                accounts.removeCard(id: card.id)
+            }
+            .presentationDetents([.height(420)])
+            .presentationBackground(.thinMaterial)
         }
     }
 
@@ -151,16 +162,31 @@ struct BalanceManageView: View {
                 .frame(width: 26, height: 26)
                 .background(BalanceBucket.bank.tint.opacity(0.12), in: .rect(cornerRadius: 8))
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(card.displayName)
-                    .font(.system(size: 13, weight: .medium))
-                    .lineLimit(1)
-                if !card.confirmed {
-                    Text("余额待设置")
-                        .font(.system(size: 9))
-                        .foregroundStyle(Theme.warm)
+            Button {
+                editingCard = card
+            } label: {
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        Text(card.displayName)
+                            .font(.system(size: 13, weight: .medium))
+                            .lineLimit(1)
+                            .foregroundStyle(.primary)
+                        Image(systemName: "pencil")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    if card.tail.isEmpty {
+                        Text("点击设置卡号尾号")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Theme.warm)
+                    } else if !card.confirmed {
+                        Text("余额待设置")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Theme.warm)
+                    }
                 }
             }
+            .buttonStyle(.plain)
 
             Spacer()
 
@@ -252,5 +278,101 @@ struct BalanceManageView: View {
 
     private func plain(_ c: Int) -> String {
         c % 100 == 0 ? "\(c / 100)" : String(format: "%.2f", Double(c) / 100)
+    }
+}
+
+// MARK: - 编辑银行卡
+struct EditCardSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    private var _bank = State(wrappedValue: "")
+    private var bank: String { get { _bank.wrappedValue } nonmutating set { _bank.wrappedValue = newValue } }
+    private var _tail = State(wrappedValue: "")
+    private var tail: String { get { _tail.wrappedValue } nonmutating set { _tail.wrappedValue = newValue } }
+    private var _alias = State(wrappedValue: "")
+    private var alias: String { get { _alias.wrappedValue } nonmutating set { _alias.wrappedValue = newValue } }
+
+    private let original: BankCard
+    private let onSave: (BankCard) -> Void
+    private let onDelete: () -> Void
+
+    init(card: BankCard, onSave: @escaping (BankCard) -> Void, onDelete: @escaping () -> Void) {
+        self.original = card
+        self.onSave = onSave
+        self.onDelete = onDelete
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 14) {
+                VStack(spacing: 0) {
+                    HStack(spacing: 12) {
+                        Text("银行").font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 44, alignment: .leading)
+                        TextField("招商银行", text: _bank.projectedValue)
+                            .font(.system(size: 15))
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 14)
+                    Divider().padding(.leading, 16).opacity(0.35)
+                    HStack(spacing: 12) {
+                        Text("尾号").font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 44, alignment: .leading)
+                        TextField("4926", text: _tail.projectedValue)
+                            .font(.system(size: 15, design: .monospaced))
+                            .keyboardType(.numberPad)
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 14)
+                    Divider().padding(.leading, 16).opacity(0.35)
+                    HStack(spacing: 12) {
+                        Text("别名").font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 44, alignment: .leading)
+                        TextField("工资卡（可选）", text: _alias.projectedValue)
+                            .font(.system(size: 15))
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 14)
+                }
+                .glassEffect(.regular, in: .rect(cornerRadius: 20))
+
+                Text("填了尾号后，同一张卡的短信就能精确对上，不会串卡。")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Spacer()
+
+                Button {
+                    var c = original
+                    c.bankName = bank.trimmingCharacters(in: .whitespaces)
+                    c.tail = String(tail.filter(\.isNumber).prefix(4))
+                    c.alias = alias.trimmingCharacters(in: .whitespaces)
+                    c.confirmed = true
+                    onSave(c)
+                    dismiss()
+                } label: {
+                    Text("保存").prominentGlassButton(tint: Theme.brand)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    onDelete()
+                    dismiss()
+                } label: {
+                    Text("删除这张卡")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.danger)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(18)
+            .background(AppBackground())
+            .navigationTitle("编辑银行卡")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("取消") { dismiss() }
+                }
+            }
+            .onAppear {
+                bank = original.bankName == "银行卡" ? "" : original.bankName
+                tail = original.tail
+                alias = original.alias
+            }
+        }
     }
 }

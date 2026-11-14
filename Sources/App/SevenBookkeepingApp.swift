@@ -19,6 +19,7 @@ struct SevenBookkeepingApp: App {
                 .onChange(of: scenePhase) { _, newPhase in
                     if newPhase == .active {
                         AutoBookkeeper.shared.checkPasteboardIfNeeded()
+                        LiveActivityController.shared.flushPending()
                         BackupService.shared.pullIfNeeded()
                     } else if newPhase == .background {
                         Task { await BackupService.shared.backupNow() }

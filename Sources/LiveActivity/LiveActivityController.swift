@@ -12,6 +12,9 @@ final class LiveActivityController {
 
     private var current: Activity<BookkeepingAttributes>?
 
+    /// 后台记账时灵动岛创建会失败（iOS 限制），先存起来等 App 回到前台再补显示
+    private var pending: (entry: Entry, total: Int)?
+
     /// 最近一次失败原因（给诊断用）
     private(set) var lastError: String?
     private(set) var lastResult: String?
@@ -94,6 +97,14 @@ final class LiveActivityController {
             lastError = "系统未允许实时活动：设置 → 7记账 → 实时活动 → 允许"
             return false
         }
+        // Live Activity 只能在 App 前台创建，后台先记下来
+        if UIApplication.shared.applicationState != .active {
+            pending = (entry, todayTotal)
+            lastResult = "后台记账已记录，回到 App 时补显示灵动岛"
+            lastError = nil
+            return false
+        }
+
         let widgets = Self.widgetBundleIDs()
         guard !widgets.isEmpty else {
             lastError = "没有灵动岛扩展：当前安装的是无扩展版本"
@@ -184,6 +195,14 @@ final class LiveActivityController {
     private static func tail(from account: String) -> String {
         guard let r = account.range(of: #"\((\d{4})\)"#, options: .regularExpression) else { return "" }
         return String(account[r]).trimmingCharacters(in: CharacterSet(charactersIn: "()"))
+    }
+
+    /// App 回到前台时补显示之前后台记账的灵动岛
+    func flushPending() {
+        guard let p = pending else { return }
+        pending = nil
+        guard UIApplication.shared.applicationState == .active else { return }
+        start(for: p.entry, todayTotal: p.total, auto: false)
     }
 
     func endAll() {
