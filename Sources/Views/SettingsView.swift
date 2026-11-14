@@ -14,6 +14,8 @@ struct SettingsView: View {
     private var accounts: Accounts { _accounts.wrappedValue }
     private var _update = State(wrappedValue: UpdateChecker.shared)
     private var update: UpdateChecker { _update.wrappedValue }
+    private var _logTick = State(wrappedValue: false)
+    private var logTick: Bool { get { _logTick.wrappedValue } nonmutating set { _logTick.wrappedValue = newValue } }
     private var _notify = State(wrappedValue: NotificationService.shared)
     private var notify: NotificationService { _notify.wrappedValue }
     private var _showClearAlert = State(wrappedValue: false)
@@ -26,22 +28,9 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
+                debugCard
+                    .id(logTick)
                 methodsCard
-                if let log = UserDefaults.standard.string(forKey: "lastIntentLog") {
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "terminal.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                        Text(log)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .glassEffect(.regular, in: .rect(cornerRadius: 14))
-                }
                 balanceCard
                 dataCard
                 islandCard
@@ -129,6 +118,65 @@ struct SettingsView: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - 调试
+    private var debugCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "ladybug.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Text("最近操作")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("v\(update.currentVersion)")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+
+            Text(IntentLog.last ?? "暂无记录 — 快捷指令还没成功调用过 App")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(IntentLog.last == nil ? .tertiary : .secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button {
+                Task { await runScreenshotTest() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "photo.on.rectangle.angled")
+                    Text("测试：识别相册最新截图")
+                }
+                .font(.system(size: 11, weight: .semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
+                .glassEffect(.regular.tint(Theme.brand.opacity(0.16)).interactive(), in: .rect(cornerRadius: 10))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+    }
+
+    private func runScreenshotTest() async {
+        IntentLog.record("App 内测试：开始读取相册")
+        guard let image = await ScreenshotReader.latest() else {
+            IntentLog.record("App 内测试：读不到图片（相册权限）")
+            await refreshLog()
+            return
+        }
+        IntentLog.record("App 内测试：已读取 \(Int(image.size.width))×\(Int(image.size.height))，OCR 中")
+        await refreshLog()
+        let entries = await AutoBookkeeper.shared.ingestImage(image, source: "测试")
+        IntentLog.record(entries.isEmpty ? "App 内测试：未识别到账单" : "App 内测试：成功 \(entries.count) 笔")
+        await refreshLog()
+    }
+
+    private func refreshLog() async {
+        await MainActor.run { logTick.toggle() }
     }
 
     // MARK: - 余额
