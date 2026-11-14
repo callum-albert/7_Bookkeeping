@@ -121,7 +121,8 @@ final class LiveActivityController {
             merchant: entry.merchant,
             sourceTitle: entry.source.title,
             totalTodayText: todayTotal.moneyText,
-            timeText: entry.date.formatted(date: .omitted, time: .shortened),
+            timeText: entry.date.formatted(date: .omitted, time: .shortened)
+                + (entry.hasPaidTime ? "" : " 记账"),
             balanceText: balance.text,
             balanceLabel: balance.label,
             howText: auto ? "自动记账" : "手动记账"

@@ -30,6 +30,8 @@ enum BillParser {
         var channel: PayChannel
         /// 短信里带的「余额」，用于校准账户余额
         var balanceAfter: Int?
+        /// date 是否为账单里的支付时间（false 表示用的是记账时刻）
+        var hasPaidTime: Bool = false
     }
 
     // MARK: - 主入口
@@ -81,21 +83,22 @@ enum BillParser {
             var category = merchant.isEmpty ? .other : Category.guess(from: cleaned, merchant: merchant)
             if isHuabeiRepay { category = .repayment }
 
+            let paidDate = extractDate(line, now: now)
+                ?? extractPaidTime(cleaned)
+                ?? extractDate(cleaned, now: now)
             out.append(Parsed(
                 amountCents: cents,
                 source: source,
                 category: category,
                 merchant: merchant,
                 account: account,
-                date: extractDate(line, now: now)
-                    ?? extractPaidTime(cleaned)
-                    ?? extractDate(cleaned, now: now)
-                    ?? now,
+                date: paidDate ?? now,
                 raw: cleaned.count > 600 ? String(cleaned.prefix(600)) : cleaned,
                 flow: flow,
                 needsReview: flow == .expense && (merchant.isEmpty || source == .bank),
                 channel: channel,
-                balanceAfter: extractBalance(line) ?? extractBalance(cleaned)
+                balanceAfter: extractBalance(line) ?? extractBalance(cleaned),
+                hasPaidTime: paidDate != nil
             ))
         }
 

@@ -178,7 +178,8 @@ final class LedgerStore {
             auto: true,
             account: p.account,
             needsReview: p.needsReview,
-            channel: p.channel
+            channel: p.channel,
+            hasPaidTime: p.hasPaidTime
         )
         add(entry)
 
@@ -211,8 +212,13 @@ final class LedgerStore {
 
     /// 合并两个渠道的同一笔消费，保留信息更全的一方
     private func merge(_ e: inout Entry, with p: BillParser.Parsed) {
-        // 交易时间取更早的（通知可能延迟）
-        if p.date < e.date { e.date = p.date }
+        // 交易时间取更早的（通知可能延迟）；任一方是真实支付时间就采用
+        if p.hasPaidTime && !e.hasPaidTime {
+            e.date = p.date
+            e.hasPaidTime = true
+        } else if p.date < e.date {
+            e.date = p.date
+        }
 
         // 商户：优先「具体商户名」，跳过「微信支付 / 银行卡」这类来源名
         let newIsConcrete = !p.merchant.isEmpty && p.merchant != p.source.title && !p.needsReview

@@ -290,6 +290,12 @@ check("⑱ 使用支付时间而非当前时间",
       Calendar.current.component(.day, from: bd?.date ?? Date()) == 13,
       "\(String(describing: bd?.date))")
 check("⑲ 尾号识别（储蓄卡(4926)）", bd?.account.contains("4926") == true, bd?.account ?? "nil")
+check("⑳ 标记为支付时间", bd?.hasPaidTime == true, "\(String(describing: bd?.hasPaidTime))")
+
+// 没有时间信息 → 用记账时间，标记 hasPaidTime = false
+let noTime = BillParser.parse("微信支付 你已成功付款 18.00元").first
+check("㉑ 无支付时间时用记账时间并标记", noTime?.hasPaidTime == false,
+      "\(String(describing: noTime?.hasPaidTime))")
 
 print("\n─────────────────────────────")
 print("通过 \(pass) / \(pass + fail)")

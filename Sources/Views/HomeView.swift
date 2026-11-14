@@ -497,7 +497,8 @@ struct EntryRow: View {
                             Text(entry.account).lineLimit(1)
                         }
                         Text("·")
-                        Text(entry.date.formatted(date: .omitted, time: .shortened))
+                        Text(entry.date.formatted(date: .omitted, time: .shortened)
+                             + (entry.hasPaidTime ? "" : " 记"))
                     }
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
@@ -594,7 +595,10 @@ struct EntryDetailView: View {
                     Divider().padding(.leading, 16)
                     detailRow("来源", entry.source.title, symbol: entry.source.symbol)
                     Divider().padding(.leading, 16)
-                    detailRow("时间", entry.date.formatted(date: .abbreviated, time: .shortened), symbol: "clock")
+                    detailRow("时间",
+                              entry.date.formatted(date: .abbreviated, time: .shortened)
+                                + (entry.hasPaidTime ? "" : "（记账时间）"),
+                              symbol: "clock")
                 }
                 .glassEffect(.regular, in: .rect(cornerRadius: 22))
 

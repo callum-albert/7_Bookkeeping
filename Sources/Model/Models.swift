@@ -156,6 +156,8 @@ struct Entry: Codable, Identifiable, Hashable {
     var channel: PayChannel = .unknown
     /// 最后修改时间，用于多设备合并时判断新旧
     var updatedAt: Date = Date()
+    /// true = date 是账单里的支付时间；false = 没识别到，用的是记账时间
+    var hasPaidTime: Bool = false
 
     var amount: Double { Double(amountCents) / 100.0 }
 
@@ -163,7 +165,7 @@ struct Entry: Codable, Identifiable, Hashable {
          merchant: String, note: String = "", source: Source, raw: String = "",
          auto: Bool = true, account: String = "", needsReview: Bool = false,
          mergedSources: [String] = [], channel: PayChannel = .unknown,
-         updatedAt: Date = Date()) {
+         updatedAt: Date = Date(), hasPaidTime: Bool = false) {
         self.id = id
         self.amountCents = amountCents
         self.date = date
@@ -178,6 +180,7 @@ struct Entry: Codable, Identifiable, Hashable {
         self.mergedSources = mergedSources
         self.channel = channel
         self.updatedAt = updatedAt
+        self.hasPaidTime = hasPaidTime
     }
 
     // 老数据没有 channel 字段时也能读
@@ -197,6 +200,7 @@ struct Entry: Codable, Identifiable, Hashable {
         mergedSources = try c.decodeIfPresent([String].self, forKey: .mergedSources) ?? []
         channel = try c.decodeIfPresent(PayChannel.self, forKey: .channel) ?? .unknown
         updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? date
+        hasPaidTime = try c.decodeIfPresent(Bool.self, forKey: .hasPaidTime) ?? false
     }
 
     var amountText: String {
