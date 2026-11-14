@@ -11,16 +11,15 @@ struct ManualSetupView: View {
                 method(
                     badge: "A", tint: Theme.warm,
                     title: "侧边按钮（推荐）",
-                    subtitle: "按一下自动截图并识别，识别后自动删除截图",
-                    needSetup: "需要设置：一次性，3 个动作 · 需允许相册读取",
+                    subtitle: "按一下截图并直接识别，不经过相册",
+                    needSetup: "需要设置：一次性，2 个动作 · 不需要相册权限",
                     steps: [
                         "设置 → 操作按钮 → 选「快捷指令」",
                         "新建快捷指令，依次添加：「截屏」",
-                        "「存储到相册」",
-                        "「7记账 · 用最新截图记账」（不需要任何参数）",
+                        "「7记账 · 识别截图记账」；点「截图」参数，选择上一步截屏结果",
                         "⚠️ 关闭「运行时显示」（开着会截到快捷指令界面）",
                         "命名为「记一笔」保存，回到操作按钮选中它",
-                        "首次使用允许相册读取权限；记账成功后会自动删除那张截图"
+                        "首次运行允许快捷指令调用 7记账；截屏结果不写入相册"
                     ]
                 )
                 method(
@@ -32,6 +31,17 @@ struct ManualSetupView: View {
                         "先按上面步骤 A 做好「记一笔」快捷指令",
                         "设置 → 辅助功能 → 触控 → 轻点背面 → 双击",
                         "选择「记一笔」"
+                    ]
+                )
+                method(
+                    badge: "备用", tint: Theme.mint,
+                    title: "无法选择截屏结果时",
+                    subtitle: "同样按一下，不经过相册",
+                    needSetup: "3 个动作 · 系统先提取文字，再交给 7记账解析",
+                    steps: [
+                        "截屏 → 从图像中提取文本 → 7记账 · 解析账单文本记账",
+                        "把「账单文本」参数设为上一步提取的文字",
+                        "绑定操作按钮；识别精度受系统文字提取影响，记完核对金额"
                     ]
                 )
                 method(
@@ -84,7 +94,7 @@ struct ManualSetupView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("默认不需要任何隐私权限")
                     .font(.system(size: 11, weight: .semibold))
-                Text("方案 A 把截图经剪贴板交给 App 自己识别，不访问相册、不需要任何权限。")
+                Text("方案 A 把截屏动作的图片结果直接交给 App 识别，不访问相册或剪贴板。")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -104,7 +114,7 @@ struct ManualSetupView: View {
                 Text("所有场景的兜底，包括零钱支付")
                     .font(.system(size: 13, weight: .semibold))
             }
-            Text("微信零钱、支付宝余额支付不会产生银行短信，自动记账覆盖不到。截图后按一下侧边按钮就能补上，不打开 App。")
+            Text("微信零钱、支付宝余额支付不会产生银行短信，自动记账覆盖不到。打开账单详情后按一下侧边按钮即可记账。")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -190,7 +200,7 @@ struct ManualSetupView: View {
     }
 
     private var note: some View {
-        Text("截图后先别删，App 会读取相册里最新那张。识别结果有问题时，可在「我的」顶部查看最近一次执行记录。")
+        Text("旧的相册或剪贴板快捷指令请改为上方两步，确认「截图」参数连接到截屏结果。识别结果有问题时，可在「我的」查看执行记录。")
             .font(.system(size: 10))
             .foregroundStyle(.tertiary)
             .fixedSize(horizontal: false, vertical: true)

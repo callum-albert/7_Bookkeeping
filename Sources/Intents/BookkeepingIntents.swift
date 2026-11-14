@@ -61,18 +61,22 @@ struct RecordFromImageIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        guard let data = image.data as Data?, let ui = UIImage(data: data) else {
+        let data = image.data
+        IntentLog.record("直接接收截屏：\(data.count) 字节")
+        guard !data.isEmpty, let ui = UIImage(data: data) else {
+            IntentLog.record("截屏参数为空或图片无法解码；检查是否选中了上一步截屏结果")
             throw NSError(domain: "SevenBookkeeping", code: 1,
-                          userInfo: [NSLocalizedDescriptionKey: "图片读取失败，请重新截屏"])
+                          userInfo: [NSLocalizedDescriptionKey: "没有收到截屏图片。请在快捷指令的「识别截图记账」中把「截图」参数设为上一步的截屏结果。"])
         }
 
         let entries = await AutoBookkeeper.shared.ingestImage(ui, source: "快捷指令·截图")
 
         guard !entries.isEmpty else {
             if !BillParser.parse(AutoBookkeeper.shared.lastOCRText).isEmpty {
-                // 已记过或被识别为退款/转账，按正常结果结束，避免提示重复操作。
+                IntentLog.record("截屏已识别，账单重复或属内部转账")
                 return .result()
             }
+            IntentLog.record("截屏 OCR 未识别到可靠账单")
             throw NSError(domain: "SevenBookkeeping", code: 2,
                           userInfo: [NSLocalizedDescriptionKey: "未识别到可靠的金额，请截取完整的付款、收款、红包或退款详情页。"])
         }
@@ -249,12 +253,6 @@ struct CategoryQuery: EntityQuery {
 // MARK: - 暴露给「快捷指令」App
 struct BookkeepingShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
-        AppShortcut(
-            intent: RecordFromLatestScreenshotIntent(),
-            phrases: ["用 \(.applicationName) 识别最新截图", "让 \(.applicationName) 记这张截图"],
-            shortTitle: "用最新截图记账",
-            systemImageName: "photo.on.rectangle.angled"
-        )
         AppShortcut(
             intent: RecordFromImageIntent(),
             phrases: ["用 \(.applicationName) 识别截图记账", "让 \(.applicationName) 记这笔"],
