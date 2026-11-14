@@ -274,6 +274,23 @@ let firstCardID = acct.cards[0].id
 acct.removeCard(id: firstCardID)
 check("⑮ 删除银行卡", acct.cards.count == 2, "count=\(acct.cards.count)")
 
+print("\n── 15. 账单详情页（商户全称 / 支付时间）──")
+let billDetail = """
+支付成功
+商户全称 上海巷鱼餐饮管理服务有限公司
+商品 美团收银909700219151774435
+支付方式 招商银行储蓄卡(4926)
+支付时间 2026年11月13日 11:43:15
+金额 ¥31.68
+"""
+let bd = BillParser.parse(billDetail).first
+check("⑯ 商户取「商户全称」", bd?.merchant == "上海巷鱼餐饮管理服务有限公司", bd?.merchant ?? "nil")
+check("⑰ 不会把字段名当商户", bd?.merchant != "全称" && bd?.merchant != "商户全称", bd?.merchant ?? "nil")
+check("⑱ 使用支付时间而非当前时间",
+      Calendar.current.component(.day, from: bd?.date ?? Date()) == 13,
+      "\(String(describing: bd?.date))")
+check("⑲ 尾号识别（储蓄卡(4926)）", bd?.account.contains("4926") == true, bd?.account ?? "nil")
+
 print("\n─────────────────────────────")
 print("通过 \(pass) / \(pass + fail)")
 exit(fail == 0 ? 0 : 1)

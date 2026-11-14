@@ -70,7 +70,8 @@ enum BillParser {
             let flow: Flow = (lineFlow == .expense && wholeFlow != .expense) ? lineFlow : lineFlow
 
             let merchant = extractMerchant(line, full: cleaned) ?? ""
-            let account = extractAccount(line, source: source)
+            var account = extractAccount(line, source: source)
+            if account.isEmpty { account = extractAccount(cleaned, source: source) }
 
             var channel = extractChannel(line, source: source)
             if channel == .unknown { channel = extractChannel(cleaned, source: source) }
@@ -86,8 +87,11 @@ enum BillParser {
                 category: category,
                 merchant: merchant,
                 account: account,
-                date: extractDate(line, now: now) ?? extractDate(cleaned, now: now) ?? now,
-                raw: line,
+                date: extractDate(line, now: now)
+                    ?? extractPaidTime(cleaned)
+                    ?? extractDate(cleaned, now: now)
+                    ?? now,
+                raw: cleaned.count > 600 ? String(cleaned.prefix(600)) : cleaned,
                 flow: flow,
                 needsReview: flow == .expense && (merchant.isEmpty || source == .bank),
                 channel: channel,
@@ -217,8 +221,12 @@ enum BillParser {
 
     // MARK: - 商户 / 概要
     private static let merchantPatterns: [String] = [
+        // 「商户全称」「商户名称」优先，值可能在下一行
+        #"商户(?:全称|名称)[\s:：]*([^\n,。]{2,40})"#,
         #"收款方\s*:?\s*([^\n,。]+)"#,
-        #"商户(?:名称)?\s*:?\s*([^\n,。]+)"#,
+        #"商户\s*:?\s*([^\n,。]+)"#,
+        #"支付对象\s*:?\s*([^\n,。]+)"#,
+        #"收款商户\s*:?\s*([^\n,。]+)"#,
         #"向\s*([^\n,。]+?)\s*(?:付款|支付|转账)"#,
         #"(?:付款给|支付给)\s*([^\n,。]+)"#,
         #"在\s*([^\n,。]+?)\s*(?:消费|付款|支付|下单|购买)"#,
@@ -244,6 +252,9 @@ enum BillParser {
     }
 
     private static func isNoiseMerchant(_ t: String) -> Bool {
+        let fieldNames = ["全称", "名称", "商户", "商户全称", "商户名称", "支付方式", "收单机构",
+                          "交易单号", "商户单号", "商品", "时间", "状态"]
+        if fieldNames.contains(t) { return true }
         let noise = ["微信支付", "支付宝", "通知", "服务", "银行", "消费", "支付成功", "付款成功",
                      "交易提醒", "账户", "中国银行", "工商银行", "招商银行", "建设银行", "农业银行"]
         return noise.contains { t == $0 || (t.contains($0) && t.count <= $0.count + 3) }
@@ -336,7 +347,8 @@ enum BillParser {
     // MARK: - 时间提取
     private static let dateFormatters: [DateFormatter] = {
         let formats = ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy/MM/dd HH:mm",
-                       "yyyy年M月d日 HH:mm", "M月d日 HH:mm", "MM-dd HH:mm", "yyyy年M月d日HH:mm"]
+                       "yyyy年M月d日 HH:mm:ss", "yyyy年M月d日 HH:mm", "yyyy年M月d日HH:mm:ss",
+                       "M月d日 HH:mm", "MM-dd HH:mm", "yyyy年M月d日HH:mm"]
         return formats.map { f in
             let df = DateFormatter()
             df.locale = Locale(identifier: "zh_CN")
@@ -345,7 +357,24 @@ enum BillParser {
         }
     }()
 
+    /// 优先使用「支付时间 / 交易时间」这类明确字段，而不是记账时刻
+    static func extractPaidTime(_ s: String) -> Date? {
+        let pattern = #"(?:支付时间|交易时间|付款时间|消费时间|扣款时间)[\s:：]*([0-9]{2,4}[-/年][0-9]{1,2}[-/月][0-9]{1,2}日?\s*[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)"#
+        guard let raw = firstMatch(pattern, in: s, group: 1) else { return nil }
+        for df in dateFormatters {
+            if let d = df.date(from: raw) { return fixYearIfNeeded(d, now: Date()) }
+        }
+        return nil
+    }
+
     static func extractDate(_ s: String, now: Date) -> Date? {
+        // 先尝试完整的「日期 + 时间」片段（含秒）
+        if let full = firstMatch(#"([0-9]{2,4}[-/年][0-9]{1,2}[-/月][0-9]{1,2}日?\s+[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)"#,
+                                 in: s, group: 1) {
+            for df in dateFormatters {
+                if let d = df.date(from: full) { return fixYearIfNeeded(d, now: now) }
+            }
+        }
         for df in dateFormatters {
             let comps = s.components(separatedBy: CharacterSet(charactersIn: " ,|｜"))
             for c in comps {
