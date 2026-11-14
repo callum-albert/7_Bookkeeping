@@ -85,7 +85,9 @@ enum BillParser {
 
             // 优先账单里的「支付时间」字段；其次金额所在行自身的时间；
             // 不再从全文里抓孤立的 HH:mm（那是状态栏时间，不是支付时间）
-            let paidDate = extractPaidTime(cleaned) ?? extractDate(line, now: now)
+            let paidDate = extractPaidTime(cleaned)
+                ?? extractFullDateTime(cleaned)
+                ?? extractDate(line, now: now)
             out.append(Parsed(
                 amountCents: cents,
                 source: source,
@@ -366,6 +368,17 @@ enum BillParser {
     static func extractPaidTime(_ s: String) -> Date? {
         let labels = ["支付时间", "交易时间", "付款时间", "消费时间", "扣款时间", "支付日期", "交易日期"]
         guard labels.contains(where: { s.contains($0) }) else { return nil }
+        guard let raw = firstMatch(
+            #"([0-9]{2,4}[-/年][0-9]{1,2}[-/月][0-9]{1,2}日?\s*[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)"#,
+            in: s, group: 1) else { return nil }
+        for df in dateFormatters {
+            if let d = df.date(from: raw) { return fixYearIfNeeded(d, now: Date()) }
+        }
+        return nil
+    }
+
+    /// 全文第一个「完整日期 + 时间」（不要求出现标签）
+    static func extractFullDateTime(_ s: String) -> Date? {
         guard let raw = firstMatch(
             #"([0-9]{2,4}[-/年][0-9]{1,2}[-/月][0-9]{1,2}日?\s*[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)"#,
             in: s, group: 1) else { return nil }

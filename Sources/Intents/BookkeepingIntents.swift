@@ -39,7 +39,9 @@ struct RecordFromTextIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
         // 不返回 dialog：避免快捷指令弹出「完成」对话框，结果通过灵动岛/通知呈现
-        IntentLog.record("文本记账：输入 \(text.count) 字")
+        let preview = text.replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+        IntentLog.record("文本记账：\(text.count)字 | \(String(preview.prefix(90)))")
         let entries = AutoBookkeeper.shared.ingest(text, source: "快捷指令", trigger: .manual)
         IntentLog.record(entries.isEmpty ? "文本记账：未识别到账单" : "文本记账：成功 \(entries.count) 笔")
         let total = entries.reduce(0) { $0 + $1.amountCents }

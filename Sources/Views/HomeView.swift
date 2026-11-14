@@ -614,15 +614,18 @@ struct EntryDetailView: View {
                             .frame(width: 22)
                         Text("时间")
                             .font(.system(size: 14))
-                        Spacer(minLength: 8)
+                            .fixedSize()
+                            .layoutPriority(1)
+                        Spacer(minLength: 4)
                         DatePicker("", selection: dateBinding, displayedComponents: [.date, .hourAndMinute])
                             .labelsHidden()
                             .datePickerStyle(.compact)
                             .scaleEffect(0.85, anchor: .trailing)
                         if !entry.hasPaidTime {
-                            Text("记账时间")
-                                .font(.system(size: 9))
+                            Text("记账")
+                                .font(.system(size: 8))
                                 .foregroundStyle(.tertiary)
+                                .fixedSize()
                         }
                     }
                     .padding(.horizontal, 16)
