@@ -9,15 +9,14 @@ struct ManualSetupView: View {
                 intro
                 method(
                     badge: "A", tint: Theme.warm,
-                    title: "侧边按钮",
-                    subtitle: "付款成功页面按一下，后台识别屏幕金额",
-                    needSetup: "需要设置：一次性，加 3 个动作",
+                    title: "侧边按钮 + 截图",
+                    subtitle: "付款后截一张图，按一下侧边按钮即可",
+                    needSetup: "需要设置：一次性，只有 1 个动作",
                     steps: [
                         "设置 → 操作按钮 → 选「快捷指令」",
-                        "新建快捷指令，加「截屏」",
-                        "再搜「从图像中提取文本」，输入选「截屏」",
-                        "再搜「7记账」→「解析账单文本记账」，文本参数选上一步的文本",
-                        "命名为「记一笔」保存，回到操作按钮选中它"
+                        "新建快捷指令 → 搜「7记账」→ 选「用最新截图记账」",
+                        "命名为「记一笔」保存，回到操作按钮选中它",
+                        "以后：付款成功页面截图（侧边键 + 音量上）→ 按侧边按钮"
                     ]
                 )
                 method(
@@ -82,7 +81,7 @@ struct ManualSetupView: View {
                 Text("所有场景的兜底，包括零钱支付")
                     .font(.system(size: 13, weight: .semibold))
             }
-            Text("微信零钱、支付宝余额支付不会产生银行短信，自动记账覆盖不到。按一下侧边按钮就能补上，全程不打开 App。")
+            Text("微信零钱、支付宝余额支付不会产生银行短信，自动记账覆盖不到。截图后按一下侧边按钮就能补上，不打开 App。")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -168,7 +167,7 @@ struct ManualSetupView: View {
     }
 
     private var note: some View {
-        Text("按按钮时请停留在微信/支付宝的「支付成功」页面，识别率最高。识别失败会自动读剪贴板兜底。")
+        Text("截图后先别删，App 会读取相册里最新那张。识别结果有问题时，可在「我的」顶部查看最近一次执行记录。")
             .font(.system(size: 10))
             .foregroundStyle(.tertiary)
             .fixedSize(horizontal: false, vertical: true)

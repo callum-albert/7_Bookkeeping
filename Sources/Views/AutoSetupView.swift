@@ -109,7 +109,7 @@ struct AutoSetupView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("动作在动作库里搜「7记账」即可看到：从剪贴板自动记账 / 解析账单文本记账。")
+            Text("动作在动作库里搜「7记账」即可看到：解析账单文本记账 / 从剪贴板自动记账 / 用最新截图记账。")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
