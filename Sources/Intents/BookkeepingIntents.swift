@@ -106,11 +106,13 @@ struct RecordFromLatestScreenshotIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult {
         IntentLog.record("最新截图：开始读取相册")
-        guard let image = await ScreenshotReader.latest() else {
+        guard let shot = await ScreenshotReader.latestWithMeta() else {
             IntentLog.record("最新截图：读不到图片（相册权限被拒或相册为空）")
             return .result()
         }
-        IntentLog.record("最新截图：已读取 \(Int(image.size.width))×\(Int(image.size.height))，开始 OCR")
+        let image = shot.image
+        let age = shot.createdAt.map { "拍摄于 \($0.formatted(date: .omitted, time: .standard))" } ?? "无拍摄时间"
+        IntentLog.record("最新截图：\(Int(image.size.width))×\(Int(image.size.height))，\(age)")
         let entries = await AutoBookkeeper.shared.ingestImage(image, source: "最新截图")
         IntentLog.record(entries.isEmpty
             ? "最新截图：OCR 后未识别到账单"
@@ -121,7 +123,16 @@ struct RecordFromLatestScreenshotIntent: AppIntent {
 
 /// 读取相册最新一张图片
 enum ScreenshotReader {
+    struct Shot {
+        var image: UIImage
+        var createdAt: Date?
+    }
+
     static func latest() async -> UIImage? {
+        (await latestWithMeta())?.image
+    }
+
+    static func latestWithMeta() async -> Shot? {
         let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         guard status == .authorized || status == .limited else { return nil }
 
@@ -129,6 +140,7 @@ enum ScreenshotReader {
         opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         opts.fetchLimit = 1
         guard let asset = PHAsset.fetchAssets(with: .image, options: opts).firstObject else { return nil }
+        let created = asset.creationDate
 
         return await withCheckedContinuation { cont in
             var resumed = false
@@ -139,7 +151,7 @@ enum ScreenshotReader {
                 guard !resumed else { return }
                 resumed = true
                 if let data, let img = UIImage(data: data) {
-                    cont.resume(returning: img)
+                    cont.resume(returning: Shot(image: img, createdAt: created))
                 } else {
                     cont.resume(returning: nil)
                 }

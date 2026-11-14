@@ -7,6 +7,7 @@ struct ManualSetupView: View {
             VStack(spacing: 16) {
                 openShortcutsButton
                 intro
+                mustShotTip
                 method(
                     badge: "A", tint: Theme.warm,
                     title: "侧边按钮 + 截图",
@@ -70,6 +71,25 @@ struct ManualSetupView: View {
             .glassEffect(.regular.tint(Theme.brand.opacity(0.16)).interactive(), in: .rect(cornerRadius: 16))
         }
         .buttonStyle(.plain)
+    }
+
+    private var mustShotTip: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.warm)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("它只读相册，不会自己截图")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("「用最新截图记账」读取的是相册里最新的一张图。用之前必须先截图（侧边键 + 音量上），否则读到的可能是旧图。")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.warm.opacity(0.10), in: .rect(cornerRadius: 14))
     }
 
     private var intro: some View {
