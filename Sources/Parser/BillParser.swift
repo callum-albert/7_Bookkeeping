@@ -83,9 +83,9 @@ enum BillParser {
             var category = merchant.isEmpty ? .other : Category.guess(from: cleaned, merchant: merchant)
             if isHuabeiRepay { category = .repayment }
 
-            let paidDate = extractDate(line, now: now)
-                ?? extractPaidTime(cleaned)
-                ?? extractDate(cleaned, now: now)
+            // 优先账单里的「支付时间」字段；其次金额所在行自身的时间；
+            // 不再从全文里抓孤立的 HH:mm（那是状态栏时间，不是支付时间）
+            let paidDate = extractPaidTime(cleaned) ?? extractDate(line, now: now)
             out.append(Parsed(
                 amountCents: cents,
                 source: source,
@@ -361,9 +361,14 @@ enum BillParser {
     }()
 
     /// 优先使用「支付时间 / 交易时间」这类明确字段，而不是记账时刻
+    /// 注意：OCR 可能把值和标签排成任意顺序（值在上、标签在下很常见），
+    /// 所以只要出现标签，就取全文第一个「完整日期 + 时间」。
     static func extractPaidTime(_ s: String) -> Date? {
-        let pattern = #"(?:支付时间|交易时间|付款时间|消费时间|扣款时间)[\s:：]*([0-9]{2,4}[-/年][0-9]{1,2}[-/月][0-9]{1,2}日?\s*[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)"#
-        guard let raw = firstMatch(pattern, in: s, group: 1) else { return nil }
+        let labels = ["支付时间", "交易时间", "付款时间", "消费时间", "扣款时间", "支付日期", "交易日期"]
+        guard labels.contains(where: { s.contains($0) }) else { return nil }
+        guard let raw = firstMatch(
+            #"([0-9]{2,4}[-/年][0-9]{1,2}[-/月][0-9]{1,2}日?\s*[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)"#,
+            in: s, group: 1) else { return nil }
         for df in dateFormatters {
             if let d = df.date(from: raw) { return fixYearIfNeeded(d, now: Date()) }
         }

@@ -297,6 +297,31 @@ let noTime = BillParser.parse("微信支付 你已成功付款 18.00元").first
 check("㉑ 无支付时间时用记账时间并标记", noTime?.hasPaidTime == false,
       "\(String(describing: noTime?.hasPaidTime))")
 
+print("\n── 16. OCR 行序颠倒（值在标签上方）──")
+// Vision 实际输出顺序：值在上、标签在下，且带状态栏时间
+let ocrOrder = """
+13:14
+账单
+美团
+稻花驿时尚智选餐厅（黄兴路店）
+-31.68
+当前状态
+支付成功
+2026年11月13日11:43:15
+支付时间
+商户全称
+上海巷鱼餐饮管理服务有限公司
+支付方式
+招商银行储蓄卡（4926）
+"""
+let oc = BillParser.parse(ocrOrder).first
+check("㉒ 值在标签上方也能取到支付时间",
+      Calendar.current.component(.day, from: oc?.date ?? Date()) == 13,
+      "\(String(describing: oc?.date))")
+check("㉓ 标记为支付时间", oc?.hasPaidTime == true, "\(String(describing: oc?.hasPaidTime))")
+check("㉔ 不抓状态栏时间", Calendar.current.component(.hour, from: oc?.date ?? Date()) == 11,
+      "\(String(describing: oc?.date))")
+
 print("\n─────────────────────────────")
 print("通过 \(pass) / \(pass + fail)")
 exit(fail == 0 ? 0 : 1)
