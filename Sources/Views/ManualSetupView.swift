@@ -10,19 +10,20 @@ struct ManualSetupView: View {
                 mustShotTip
                 method(
                     badge: "A", tint: Theme.warm,
-                    title: "侧边按钮 + 截图",
-                    subtitle: "付款后截一张图，按一下侧边按钮即可",
-                    needSetup: "需要设置：一次性，只有 1 个动作",
+                    title: "侧边按钮（推荐，零权限）",
+                    subtitle: "按一下自动截图并识别，不读相册",
+                    needSetup: "需要设置：一次性，3 个动作 + 关闭「运行时显示」",
                     steps: [
                         "设置 → 操作按钮 → 选「快捷指令」",
-                        "新建快捷指令 → 搜「7记账」→ 选「用最新截图记账」",
-                        "命名为「记一笔」保存，回到操作按钮选中它",
-                        "以后：付款成功页面截图（侧边键 + 音量上）→ 按侧边按钮"
+                        "新建快捷指令，依次添加：「截屏」→「从图像中提取文本」→「7记账 · 解析账单文本记账」",
+                        "「从图像中提取文本」的输入选「截屏」；「解析账单文本记账」的文本参数选上一步的文本",
+                        "⚠️ 关闭「运行时显示」（开着会跳到快捷指令界面，截屏就截错东西）",
+                        "命名为「记一笔」保存，回到操作按钮选中它"
                     ]
                 )
                 method(
                     badge: "B", tint: Theme.brand,
-                    title: "轻点背面",
+                    title: "轻点背面（同上）",
                     subtitle: "双击手机背面触发同一个快捷指令",
                     needSetup: "需要设置：一次性",
                     steps: [
@@ -75,13 +76,13 @@ struct ManualSetupView: View {
 
     private var mustShotTip: some View {
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
+            Image(systemName: "lock.shield.fill")
                 .font(.system(size: 11))
-                .foregroundStyle(Theme.warm)
+                .foregroundStyle(Theme.mint)
             VStack(alignment: .leading, spacing: 3) {
-                Text("它只读相册，不会自己截图")
+                Text("默认不需要任何隐私权限")
                     .font(.system(size: 11, weight: .semibold))
-                Text("「用最新截图记账」读取的是相册里最新的一张图。用之前必须先截图（侧边键 + 音量上），否则读到的可能是旧图。")
+                Text("下面方案 A 在你的快捷指令里完成识别，只把识别出的文字交给 App，不读取相册。")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -89,7 +90,7 @@ struct ManualSetupView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.warm.opacity(0.10), in: .rect(cornerRadius: 14))
+        .background(Theme.mint.opacity(0.10), in: .rect(cornerRadius: 14))
     }
 
     private var intro: some View {
