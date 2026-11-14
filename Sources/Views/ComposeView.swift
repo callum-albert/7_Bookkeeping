@@ -79,6 +79,7 @@ struct ComposeView: View {
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 15)
+                    .background(.ultraThinMaterial, in: .rect(cornerRadius: 22))
                     .glassEffect(.regular.tint(Theme.brand.opacity(0.82)).interactive(),
                                  in: .rect(cornerRadius: 22))
                     .overlay {
