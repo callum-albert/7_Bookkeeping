@@ -33,7 +33,8 @@ struct RootView: View {
         }
         .task {
             await NotificationService.shared.requestIfNeeded()
-            // 说明：默认不请求相册权限。「最新截图记账」需要时才在设置页手动授权。
+            // 「用最新截图记账」需要读取相册最新一张图（仅读取，不上传）
+            _ = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         }
         .sheet(isPresented: _showCompose.projectedValue) {
             ComposeView()
