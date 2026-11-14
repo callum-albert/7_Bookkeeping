@@ -459,6 +459,31 @@ check("㊶ 模板：金额", ad?.amountCents == 2760, "\(String(describing: ad?.
 check("㊷ 模板：分类餐饮", ad?.category == .food, "\(String(describing: ad?.category))")
 check("㊸ 模板：来源不是「交易」", ad?.merchant != "交易", ad?.merchant ?? "nil")
 
+print("\n── 21. 视觉行格式（标签+值在同一行）──")
+let visualLines = """
+14:30  交易详情  门店
+27.60
+小女当家
+当前状态  支付成功
+支付时间  2026年11月09日 11:47:09
+商品  【POS】_上海互联宝地店_567850
+商户全称  当家食力鲜厨（上海）餐饮有限公司
+收单机构  财付通支付科技有限公司
+支付方式  招商银行储蓄卡(4926)
+交易单号  4200003227202611094941731436
+商户单号  可在支持的商户扫码退款
+交易服务
+对订单有疑惑  发起群收款
+在此商户的交易  申请电子凭证
+"""
+let vl = BillParser.parse(visualLines).first
+check("㊹ 视觉行：商户正确", vl?.merchant == "当家食力鲜厨(上海)餐饮有限公司", vl?.merchant ?? "nil")
+check("㊺ 视觉行：来源不是「的交易」", (vl?.merchant ?? "").contains("的交易") == false, vl?.merchant ?? "nil")
+check("㊻ 视觉行：时间正确", Calendar.current.component(.day, from: vl?.date ?? Date()) == 9,
+      "\(String(describing: vl?.date))")
+check("㊼ 视觉行：支付方式尾号", vl?.account.contains("4926") == true, vl?.account ?? "nil")
+check("㊽ 视觉行：分类餐饮", vl?.category == .food, "\(String(describing: vl?.category))")
+
 print("\n─────────────────────────────")
 print("通过 \(pass) / \(pass + fail)")
 exit(fail == 0 ? 0 : 1)
