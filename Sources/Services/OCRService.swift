@@ -1,57 +1,33 @@
 import Foundation
-import Vision
 import UIKit
+import CoreImage
+import ImageIO
 
-/// 本机 OCR，银行级隐私：图片不出设备
+/// UIKit 入口；识别流程与本机图片验收工具复用 ReceiptOCR。
 enum OCRService {
     static func recognize(_ image: UIImage) async -> String {
-        guard let cg = image.cgImage else { return "" }
-        return await withCheckedContinuation { cont in
-            let request = VNRecognizeTextRequest { req, _ in
-                let obs = req.results as? [VNRecognizedTextObservation] ?? []
+        await recognizeReceipt(image).text
+    }
 
-                // 关键：先按「视觉行」聚类，同一水平线上的文字合成一行
-                // 账单页的「标签 + 值」经常被拆成两个 observation，
-                // 只有按坐标还原成视觉行，模板解析才能对上。
-                var items: [(y: CGFloat, x: CGFloat, text: String)] = []
-                for o in obs {
-                    guard let t = o.topCandidates(1).first?.string else { continue }
-                    items.append((o.boundingBox.midY, o.boundingBox.minX, t))
-                }
-                items.sort { $0.y > $1.y }
-
-                var lines: [[(x: CGFloat, text: String)]] = []
-                var current: [(x: CGFloat, text: String)] = []
-                var lastY: CGFloat = -1
-                let tolerance: CGFloat = 0.013
-
-                for it in items {
-                    if lastY < 0 || abs(it.y - lastY) <= tolerance {
-                        current.append((it.x, it.text))
-                    } else {
-                        if !current.isEmpty { lines.append(current) }
-                        current = [(it.x, it.text)]
-                    }
-                    lastY = it.y
-                }
-                if !current.isEmpty { lines.append(current) }
-
-                let text = lines
-                    .map { row in row.sorted { $0.x < $1.x }.map(\.text).joined(separator: "  ") }
-                    .joined(separator: "\n")
-                cont.resume(returning: text)
-            }
-            request.recognitionLevel = .accurate
-            request.recognitionLanguages = ["zh-Hans", "en-US"]
-            request.usesLanguageCorrection = true
-
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    try VNImageRequestHandler(cgImage: cg, options: [:]).perform([request])
-                } catch {
-                    cont.resume(returning: "")
-                }
-            }
+    static func recognizeReceipt(_ image: UIImage) async -> ReceiptOCR.Receipt {
+        let cg: CGImage
+        if let pixels = image.cgImage { cg = pixels }
+        else if let ci = image.ciImage, let pixels = CIContext().createCGImage(ci, from: ci.extent) { cg = pixels }
+        else { return ReceiptOCR.Receipt(text: "", needsReview: true) }
+        let orientation: CGImagePropertyOrientation
+        switch image.imageOrientation {
+        case .up: orientation = .up
+        case .down: orientation = .down
+        case .left: orientation = .left
+        case .right: orientation = .right
+        case .upMirrored: orientation = .upMirrored
+        case .downMirrored: orientation = .downMirrored
+        case .leftMirrored: orientation = .leftMirrored
+        case .rightMirrored: orientation = .rightMirrored
+        @unknown default: orientation = .up
         }
+        return await Task.detached(priority: .userInitiated) {
+            ReceiptOCR.recognize(cg, orientation: orientation)
+        }.value
     }
 }

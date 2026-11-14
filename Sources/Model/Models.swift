@@ -167,7 +167,7 @@ enum Category: String, Codable, CaseIterable, Identifiable {
 
         score(.food, ["美团", "饿了么", "肯德基", "麦当劳", "星巴克", "瑞幸", "咖啡", "餐饮", "饭店",
                       "餐厅", "奶茶", "喜茶", "蜜雪", "食堂", "外卖", "烧烤", "火锅", "面包", "便利店",
-                      "7-11", "全家", "罗森", "沙县", "兰州", "早餐", "午餐", "晚餐", "超市", "超市便利"])
+                      "7-11", "全家", "罗森", "沙县", "兰州", "早餐", "午餐", "晚餐", "超市", "超市便利", "大米先生", "乡村基"])
         score(.transport, ["滴滴", "高德", "曹操", "出租车", "打车", "地铁", "公交", "地铁公交",
                            "加油", "中石化", "中石油", "停车", "高速", "etc", "铁路", "12306", "哈啰", "摩拜",
                            "乘车", "先乘车", "网约车", "交通卡", "公共交通", "一卡通", "单车",
@@ -182,7 +182,8 @@ enum Category: String, Codable, CaseIterable, Identifiable {
         score(.home, ["物业", "宽带", "装修", "家具", "家电", "保洁", "维修"])
         score(.medical, ["医院", "药房", "药店", "诊所", "医疗", "体检", "挂号", "口腔", "牙科"])
         score(.education, ["学费", "书店", "当当", "课程", "培训", "教育", "考试", "文具", "得到", "知识"])
-        score(.digital, ["apple", "app store", "icloud", "数码", "华为", "苹果", "耳机", "电脑", "手机", "充电"])
+        score(.digital, ["apple", "app store", "icloud", "数码", "华为", "苹果", "耳机", "电脑", "手机", "充电",
+                         "deepseek", "api服务", "人工智能", "云服务", "云计算", "算力"])
         score(.social, ["红包", "转账", "礼金", "随礼", "份子", "红包转账"])
         score(.travel, ["携程", "airbnb", "酒店", "机票", "飞猪", "去哪儿", "民宿", "旅行", "景区", "门票"])
         score(.pet, ["宠物", "猫", "狗", "宠物医院", "猫粮", "狗粮"])
@@ -197,6 +198,8 @@ struct Entry: Codable, Identifiable, Hashable {
     var date: Date
     var category: Category
     var merchant: String        // 概要 / 商户
+    var product: String = ""   // 商品说明，与商户独立保存
+    var transactionID: String = "" // 平台交易单号，区分同店同金额的连续消费
     var note: String = ""
     var source: Source
     var raw: String = ""        // 命中的原始文本
@@ -220,12 +223,14 @@ struct Entry: Codable, Identifiable, Hashable {
          merchant: String, note: String = "", source: Source, raw: String = "",
          auto: Bool = true, account: String = "", needsReview: Bool = false,
          mergedSources: [String] = [], channel: PayChannel = .unknown,
-         updatedAt: Date = Date(), hasPaidTime: Bool = false) {
+         updatedAt: Date = Date(), hasPaidTime: Bool = false, product: String = "", transactionID: String = "") {
         self.id = id
         self.amountCents = amountCents
         self.date = date
         self.category = category
         self.merchant = merchant
+        self.product = product
+        self.transactionID = transactionID
         self.note = note
         self.source = source
         self.raw = raw
@@ -246,6 +251,8 @@ struct Entry: Codable, Identifiable, Hashable {
         date = try c.decode(Date.self, forKey: .date)
         category = try c.decode(Category.self, forKey: .category)
         merchant = try c.decode(String.self, forKey: .merchant)
+        product = try c.decodeIfPresent(String.self, forKey: .product) ?? ""
+        transactionID = try c.decodeIfPresent(String.self, forKey: .transactionID) ?? ""
         note = try c.decodeIfPresent(String.self, forKey: .note) ?? ""
         source = try c.decode(Source.self, forKey: .source)
         raw = try c.decodeIfPresent(String.self, forKey: .raw) ?? ""

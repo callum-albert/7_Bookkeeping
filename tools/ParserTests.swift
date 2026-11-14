@@ -284,7 +284,7 @@ let billDetail = """
 金额 ¥31.68
 """
 let bd = BillParser.parse(billDetail).first
-check("⑯ 来源取「商品」值", bd?.merchant == "美团收银909700219151774435", bd?.merchant ?? "nil")
+check("⑯ 商户和商品分别保留", bd?.merchant == "上海巷鱼餐饮管理服务有限公司" && bd?.product == "美团收银909700219151774435", bd?.merchant ?? "nil")
 check("⑰ 不会把字段名当商户", bd?.merchant != "全称" && bd?.merchant != "商户全称", bd?.merchant ?? "nil")
 check("⑱ 使用支付时间而非当前时间",
       Calendar.current.component(.day, from: bd?.date ?? Date()) == 13,
@@ -365,7 +365,7 @@ let fullBill = """
 可在支持商户扫码退款
 """
 let fb = BillParser.parse(fullBill).first
-check("㉘ 来源取商品值（不取单号/退款说明）", fb?.merchant == "美团收银909700219151774435", fb?.merchant ?? "nil")
+check("㉘ 商户不取商品或收单机构", fb?.merchant == "上海巷鱼餐饮管理服务有限公司" && fb?.product == "美团收银909700219151774435", fb?.merchant ?? "nil")
 check("㉙ 分类为餐饮", fb?.category == .food, "\(String(describing: fb?.category))")
 
 print("\n── 18. 同时有「商品」和「商户全称」时优先商户全称 ──")
@@ -380,7 +380,7 @@ let twoFields1 = """
 2026年11月12日18:20:05
 """
 let mf1 = BillParser.parse(twoFields1).first
-check("㉚ 来源取商品值", mf1?.merchant == "美团收银12345678", mf1?.merchant ?? "nil")
+check("㉚ 商户全称优先，商品单独保存", mf1?.merchant == "杭州知味观餐饮有限公司" && mf1?.product == "美团收银12345678", mf1?.merchant ?? "nil")
 check("㉛ 分类为餐饮", mf1?.category == .food, "\(String(describing: mf1?.category))")
 
 let twoFields2 = """
@@ -391,7 +391,7 @@ let twoFields2 = """
 支付时间 2026年11月11日12:30:00
 """
 let mf2 = BillParser.parse(twoFields2).first
-check("㉜ 商品可读时用商品名", mf2?.merchant == "海底捞火锅", mf2?.merchant ?? "nil")
+check("㉜ 可读商品也不覆盖商户", mf2?.merchant == "深圳海底捞餐饮管理有限公司" && mf2?.product == "海底捞火锅", mf2?.merchant ?? "nil")
 
 print("\n── 19. 新场景：滴滴 / 交通卡 ──")
 let didi = """
@@ -405,7 +405,7 @@ let didi = """
 2026年11月12日08:15:00
 """
 let d1 = BillParser.parse(didi).first
-check("㉝ 滴滴来源取商品值", d1?.merchant == "先乘车后付款", d1?.merchant ?? "nil")
+check("㉝ 滴滴商户与服务分开", d1?.merchant == "广州启安科技有限公司" && d1?.product == "先乘车后付款", d1?.merchant ?? "nil")
 check("㉞ 靠「乘车」判为交通", d1?.category == .transport, "\(String(describing: d1?.category))")
 
 let metroCard = """
@@ -450,7 +450,7 @@ T1326517543793922050
 申请电子凭证
 """
 let ad = BillParser.parse(alipayDetail).first
-check("㊲ 模板：来源取商品值", ad?.merchant == "【POS】_上海互联宝地店_567850", ad?.merchant ?? "nil")
+check("㊲ 模板：商户独立于POS商品", ad?.merchant == "当家食力鲜厨(上海)餐饮有限公司" && ad?.product == "【POS】_上海互联宝地店_567850", ad?.merchant ?? "nil")
 check("㊳ 模板：支付时间正确",
       Calendar.current.component(.day, from: ad?.date ?? Date()) == 9, "\(String(describing: ad?.date))")
 check("㊴ 模板：支付时间不被标成记账时间", ad?.hasPaidTime == true, "\(String(describing: ad?.hasPaidTime))")
@@ -477,7 +477,7 @@ let visualLines = """
 在此商户的交易  申请电子凭证
 """
 let vl = BillParser.parse(visualLines).first
-check("㊹ 视觉行：来源取商品值", vl?.merchant == "【POS】_上海互联宝地店_567850", vl?.merchant ?? "nil")
+check("㊹ 视觉行：商户独立于POS商品", vl?.merchant == "当家食力鲜厨(上海)餐饮有限公司" && vl?.product == "【POS】_上海互联宝地店_567850", vl?.merchant ?? "nil")
 check("㊺ 视觉行：来源不是「的交易」", (vl?.merchant ?? "").contains("的交易") == false, vl?.merchant ?? "nil")
 check("㊻ 视觉行：时间正确", Calendar.current.component(.day, from: vl?.date ?? Date()) == 9,
       "\(String(describing: vl?.date))")
@@ -496,7 +496,7 @@ let rentBill = """
 """
 let rb = BillParser.parse(rentBill).first
 check("㊾ 房租识别", rb?.category == .rent, "\(String(describing: rb?.category))")
-check("㊿ 房租来源取商品值", rb?.merchant == "房租", rb?.merchant ?? "nil")
+check("㊿ 房租保留商户和商品", rb?.merchant == "链家房屋租赁有限公司" && rb?.product == "房租", rb?.merchant ?? "nil")
 
 let utilBill = """
 支付宝
@@ -524,6 +524,155 @@ let wb = BillParser.parse(wechatNoStatus).first
 check("52 无「当前状态」也走模板", wb?.merchant == "星巴克咖啡(上海)有限公司", wb?.merchant ?? "nil")
 check("53 分类餐饮", wb?.category == .food, "\(String(describing: wb?.category))")
 check("54 来源不是银行卡", wb?.merchant != "银行卡", wb?.merchant ?? "nil")
+
+print("\n── 23. 真实错账模式回归（模拟文本，非用户截图）──")
+let receipt = """
+微信支付
+账单详情
+-1,234.50
+当前状态 支付成功
+商户全称 星巴克咖啡上海有限公司
+商品名称 咖啡豆礼盒
+支付方式 零钱通
+支付时间 2026/11/13 11:43:15
+交易单号 4200003231202611130744450480
+优惠金额 9.00
+"""
+let r = BillParser.parse(receipt).first
+check("千分位金额不被优惠覆盖", r?.amountCents == 123450)
+check("零钱通不是转账", r?.flow == .expense && r?.channel == .wechatZero)
+check("商品独立保留", r?.product == "咖啡豆礼盒")
+check("斜线日期带秒可识别", r?.hasPaidTime == true)
+check("字段完整无需确认", r?.needsReview == false)
+
+let actual = BillParser.parse(receipt + "\n实付金额 1,220.50").first
+check("实付优先于原价", actual?.amountCents == 122050)
+let integer = BillParser.parse(receipt + "\n实付金额 1200").first
+check("显式实付字段支持整数", integer?.amountCents == 120000)
+let missingAmount = receipt.replacingOccurrences(of: "-1,234.50\n", with: "")
+check("缺主金额时不把优惠记成消费", BillParser.parse(missingAmount).isEmpty)
+let missingTime = BillParser.parse(receipt.replacingOccurrences(of: "支付时间 2026/11/13 11:43:15", with: "13:14")).first
+check("状态栏时间不冒充支付时间", missingTime?.hasPaidTime == false && missingTime?.needsReview == true)
+let refund = BillParser.parse(receipt.replacingOccurrences(of: "当前状态 支付成功", with: "当前状态 已全额退款")).first
+check("退款详情不回退为消费", refund?.flow == .income)
+check("待付款不入账", BillParser.parse(receipt.replacingOccurrences(of: "支付成功", with: "待付款")).isEmpty)
+check("支付失败不入账", BillParser.parse(receipt.replacingOccurrences(of: "支付成功", with: "支付失败")).isEmpty)
+let topup = BillParser.parse(receipt.replacingOccurrences(of: "咖啡豆礼盒", with: "零钱充值")).first
+check("支付成功的内部充值也不算消费", topup?.flow == .transfer)
+let balance = BillParser.parse(receipt.replacingOccurrences(of: "微信支付", with: "支付宝").replacingOccurrences(of: "零钱通", with: "余额")).first
+check("支付宝余额渠道", balance?.channel == .alipayBalance && balance?.account == "余额")
+
+let createdFirst = """
+支付宝
+-26.00
+创建时间 2026-11-12 10:00:00
+付款时间 2026-11-13 11:43:15
+商家名称 瑞幸咖啡
+商品说明 生椰拿铁
+付款方式 花呗
+"""
+let cf = BillParser.parse(createdFirst).first
+check("付款时间优先于创建时间", Calendar.current.component(.day, from: cf?.date ?? base) == 13)
+check("支付宝同义字段", cf?.merchant == "瑞幸咖啡" && cf?.product == "生椰拿铁" && cf?.channel == .huabei)
+let alipayOrder = BillParser.parse(createdFirst + "\n商户单号 123456789012").first
+check("支付宝不因商户单号误判为微信", alipayOrder?.source == .alipay)
+let successOnly = BillParser.parse("微信支付\n支付成功\n¥32.00\n星巴克\n优惠金额 5.00\n完成")
+check("简单成功页只记主金额", successOnly.count == 1 && successOnly.first?.amountCents == 3200)
+check("简单成功页商户和缺失字段", successOnly.first?.merchant == "星巴克" && successOnly.first?.needsReview == true)
+
+print("\n── 24. OCR 几何行序与多行字段 ──")
+func box(_ x: Double, _ y: Double, _ text: String, _ height: Double = 0.018) -> OCRLayout.Item {
+    OCRLayout.Item(rect: CGRect(x: x, y: y, width: 0.25, height: height), text: text)
+}
+let layout = OCRLayout.text(from: [
+    box(0.1, 0.85, "-27.60", 0.035),
+    box(0.1, 0.70, "商户全称"), box(0.5, 0.695, "上海星巴克"),
+    box(0.5, 0.671, "咖啡有限公司"),
+    box(0.1, 0.62, "支付方式"), box(0.5, 0.616, "零钱"),
+    box(0.1, 0.56, "支付时间"), box(0.5, 0.557, "2026-11-13 11:43:15")
+])
+let geom = BillParser.parse(layout).first
+check("轻微基线偏移仍配对标签和值", layout.contains("商户全称  上海星巴克"), layout)
+check("多行商户合并且不串支付方式", geom?.merchant == "上海星巴克 咖啡有限公司", geom?.merchant ?? "nil")
+check("几何版式保留支付渠道和日期", geom?.channel == .wechatZero && geom?.hasPaidTime == true)
+let closeRows = OCRLayout.text(from: [box(0.1, 0.7, "支付方式", 0.01), box(0.1, 0.69, "支付时间", 0.01)])
+check("短行距不会串成一行", closeRows.components(separatedBy: .newlines).count == 2)
+let wrappedTime = OCRLayout.text(from: [
+    box(0.1, 0.8, "-20.00"), box(0.1, 0.7, "支付时间"),
+    box(0.5, 0.7, "2026-11-13"), box(0.5, 0.67, "11:43:15"),
+    box(0.1, 0.6, "支付方式"), box(0.5, 0.6, "零钱")
+])
+check("右栏换行时间可还原", BillParser.parse(wrappedTime).first?.hasPaidTime == true, wrappedTime)
+
+print("\n── 25. 商品兼容、去重、持久化 ──")
+let saved = Entry(amountCents: 2760, date: base, category: .food, merchant: "咖啡店", source: .wechat, product: "咖啡豆")
+let encoded = try! JSONEncoder().encode(saved)
+let decoded = try! JSONDecoder().decode(Entry.self, from: encoded)
+check("商品字段JSON往返保留", decoded.product == "咖啡豆")
+var oldJSON = try! JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+oldJSON.removeValue(forKey: "product")
+oldJSON.removeValue(forKey: "transactionID")
+let legacy = try! JSONDecoder().decode(Entry.self, from: JSONSerialization.data(withJSONObject: oldJSON))
+check("旧账本无商品字段也能读取", legacy.product.isEmpty)
+check("旧账本无交易单号字段也能读取", legacy.transactionID.isEmpty)
+let reviewStore = LedgerStore()
+var reviewA = mk(9876, .wechat, "甲咖啡店", .wechatZero, base, true)
+reviewA.needsReview = true
+var reviewB = mk(9876, .wechat, "乙咖啡店", .wechatZero, base, true)
+reviewB.needsReview = true
+let beforeReview = reviewStore.entries.count
+_ = reviewStore.ingest(reviewA)
+_ = reviewStore.ingest(reviewB)
+check("待确认的不同商户不误合并", reviewStore.entries.count == beforeReview + 2)
+var otherPlatform = reviewA
+otherPlatform.source = .alipay
+_ = reviewStore.ingest(otherPlatform)
+check("微信支付宝分别消费不误合并", reviewStore.entries.count == beforeReview + 3)
+if let r { _ = reviewStore.ingest(r) }
+check("识别商品写入账本", reviewStore.entries.contains { $0.product == "咖啡豆礼盒" })
+
+print("\n── 26. 自动识屏会话门控 ──")
+var screenGate = ScreenReceiptGate()
+check("第一帧不立即入账", !screenGate.accept(receipt, now: base))
+check("两次稳定结果后允许入账", screenGate.accept(receipt, now: base.addingTimeInterval(2)))
+check("支付页持续显示只入账一次", !screenGate.accept(receipt, now: base.addingTimeInterval(4)))
+let anotherReceipt = receipt.replacingOccurrences(of: "星巴克咖啡上海有限公司", with: "另一家餐饮有限公司")
+    .replacingOccurrences(of: "4200003231202611130744450480", with: "4200003231202611130744450481")
+check("同金额不同商户先稳定检测", !screenGate.accept(anotherReceipt, now: base.addingTimeInterval(6)))
+check("同金额不同商户允许第二笔", screenGate.accept(anotherReceipt, now: base.addingTimeInterval(8)))
+var interruptedGate = ScreenReceiptGate()
+_ = interruptedGate.accept(receipt, now: base)
+check("切到普通画面不入账", !interruptedGate.accept("普通聊天内容，商品报价32元", now: base.addingTimeInterval(1)))
+check("画面切换后重新计稳定时间", !interruptedGate.accept(receipt, now: base.addingTimeInterval(2)))
+check("重新稳定后可记账", interruptedGate.accept(receipt, now: base.addingTimeInterval(4)))
+var refundGate = ScreenReceiptGate()
+let refundPage = receipt.replacingOccurrences(of: "支付成功", with: "退款成功")
+_ = refundGate.accept(refundPage, now: base)
+check("退款页多帧也不自动记消费", !refundGate.accept(refundPage, now: base.addingTimeInterval(2)))
+var failedGate = ScreenReceiptGate()
+let failedPage = receipt.replacingOccurrences(of: "支付成功", with: "支付失败")
+_ = failedGate.accept(failedPage, now: base)
+check("失败页不自动记账", !failedGate.accept(failedPage, now: base.addingTimeInterval(2)))
+var bankGate = ScreenReceiptGate()
+_ = bankGate.accept("招商银行 消费100元", now: base)
+check("非支付成功页面不被识屏通道误记", !bankGate.accept("招商银行 消费100元", now: base.addingTimeInterval(2)))
+var freshGate = ScreenReceiptGate()
+check("新会话不继承旧画面的待记状态", !freshGate.accept(receipt, now: base.addingTimeInterval(20)))
+
+var txnA = mk(5555, .wechat, "同店咖啡", .wechatZero, base, false)
+txnA.transactionID = "transaction0001"
+var txnB = txnA
+txnB.transactionID = "transaction0002"
+let beforeTransactions = reviewStore.entries.count
+_ = reviewStore.ingest(txnA)
+_ = reviewStore.ingest(txnB)
+check("同店同金额但单号不同保留两笔", reviewStore.entries.count == beforeTransactions + 2)
+txnA.date = base.addingTimeInterval(86400)
+_ = reviewStore.ingest(txnA)
+check("同单号隔天重识别也不重复扣款", reviewStore.entries.count == beforeTransactions + 2)
+let sameShopNextOrder = receipt.replacingOccurrences(of: "4200003231202611130744450480", with: "4200003231202611130744450482")
+check("同店新单号仍需稳定画面", !screenGate.accept(sameShopNextOrder, now: base.addingTimeInterval(30)))
+check("同店新单号可以再次自动记账", screenGate.accept(sameShopNextOrder, now: base.addingTimeInterval(32)))
 
 print("\n─────────────────────────────")
 print("通过 \(pass) / \(pass + fail)")

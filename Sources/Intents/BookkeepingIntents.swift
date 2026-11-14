@@ -42,7 +42,7 @@ struct RecordFromTextIntent: AppIntent {
         let preview = text.replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespaces)
         IntentLog.record("文本记账：\(text.count)字 | \(String(preview.prefix(90)))")
-        let entries = AutoBookkeeper.shared.ingest(text, source: "快捷指令", trigger: .manual)
+        let entries = AutoBookkeeper.shared.ingest(text, source: "快捷指令", trigger: .automatic)
         IntentLog.record(entries.isEmpty ? "文本记账：未识别到账单" : "文本记账：成功 \(entries.count) 笔")
         let total = entries.reduce(0) { $0 + $1.amountCents }
         return .result(value: entries.isEmpty ? "0" : total.moneyText)
@@ -78,24 +78,23 @@ struct RecordFromImageIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult {
         guard let data = image.data as Data?, let ui = UIImage(data: data) else {
-            return .result(dialog: "图片读取失败，请重新截屏")
+            throw NSError(domain: "SevenBookkeeping", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "图片读取失败，请重新截屏"])
         }
 
-        let text = await OCRService.recognize(ui)
-        var entries = AutoBookkeeper.shared.ingest(text, source: "快捷指令·截图", trigger: .manual)
-
-        // 兜底：截图没识别出来时，尝试剪贴板（如果之前复制过通知）
-        if entries.isEmpty,
-           let clip = UIPasteboard.general.string, clip.count > 6, clip.count < 4000 {
-            entries = AutoBookkeeper.shared.ingest(clip, source: "快捷指令·剪贴板", trigger: .manual)
-        }
+        let entries = await AutoBookkeeper.shared.ingestImage(ui, source: "快捷指令·截图")
 
         guard !entries.isEmpty else {
-            return .result(dialog: "没识别到金额。请停留在「支付成功」页面再按一次，或先截个图。")
+            if !BillParser.parse(AutoBookkeeper.shared.lastOCRText).isEmpty {
+                // 已记过或被识别为退款/转账，按正常结果结束，避免提示重复操作。
+                return .result()
+            }
+            throw NSError(domain: "SevenBookkeeping", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "未识别到可靠的账单金额，请截取完整的支付成功页或账单详情页。"])
         }
         let total = entries.reduce(0) { $0 + $1.amountCents }
-        let first = entries[0]
-        return .result(dialog: "已记账 \(total.moneyText) · \(first.merchant)")
+        IntentLog.record("截图记账：\(entries.count) 笔，\(total.moneyText)")
+        return .result()
     }
 }
 
@@ -123,7 +122,21 @@ struct RecordFromLatestScreenshotIntent: AppIntent {
     }
 }
 
-/// 读取相册最新一张图片
+/// 关闭支付 App 后读取刚刚截取的账单，不读旧图，不弹权限提示。
+struct RecordRecentScreenshotIntent: AppIntent {
+    static var title: LocalizedStringResource = "自动识别刚截的账单"
+    static var description = IntentDescription("用于微信/支付宝关闭时自动化：仅识别90秒内的新截图，需提前授权相册；仍需先截屏")
+    static var openAppWhenRun = false
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        guard let shot = await ScreenshotReader.latestWithMeta(maxAge: 90) else { return .result() }
+        _ = await AutoBookkeeper.shared.ingestImage(shot.image, source: "自动化·新截图")
+        return .result()
+    }
+}
+
+/// 读取相册最新截图（排除普通照片）
 enum ScreenshotReader {
     struct Shot {
         var image: UIImage
@@ -134,15 +147,22 @@ enum ScreenshotReader {
         (await latestWithMeta())?.image
     }
 
-    static func latestWithMeta() async -> Shot? {
-        let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+    static func latestWithMeta(maxAge: TimeInterval? = nil) async -> Shot? {
+        let status: PHAuthorizationStatus
+        if maxAge != nil { status = PHPhotoLibrary.authorizationStatus(for: .readWrite) }
+        else { status = await PHPhotoLibrary.requestAuthorization(for: .readWrite) }
         guard status == .authorized || status == .limited else { return nil }
 
         let opts = PHFetchOptions()
         opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         opts.fetchLimit = 1
+        opts.predicate = NSPredicate(format: "(mediaSubtype & %d) != 0", PHAssetMediaSubtype.photoScreenshot.rawValue)
         guard let asset = PHAsset.fetchAssets(with: .image, options: opts).firstObject else { return nil }
         let created = asset.creationDate
+        if let maxAge {
+            guard let created, Date().timeIntervalSince(created) >= 0,
+                  Date().timeIntervalSince(created) <= maxAge else { return nil }
+        }
 
         return await withCheckedContinuation { cont in
             var resumed = false
@@ -228,6 +248,12 @@ struct CategoryQuery: EntityQuery {
 // MARK: - 暴露给「快捷指令」App
 struct BookkeepingShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
+        AppShortcut(
+            intent: RecordRecentScreenshotIntent(),
+            phrases: ["用 \(.applicationName) 识别刚截的账单"],
+            shortTitle: "自动识别刚截的账单",
+            systemImageName: "photo.badge.bolt"
+        )
         AppShortcut(
             intent: ParseClipboardIntent(),
             phrases: [

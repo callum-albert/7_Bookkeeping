@@ -4,7 +4,9 @@ set -euo pipefail
 
 SDK="${SDK:-/tmp/sdkbuild/sdk/iPhoneOS27.2.sdk}"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-BUILD="$ROOT/build"
+# Documents 可能由 iCloud 管理，系统会为 .app 自动加 FinderInfo，导致签名竞态失败。
+# 在本机临时目录构建，只把不带扩展属性的 IPA 复制回工作区。
+BUILD="$(mktemp -d /tmp/7jz-build.XXXXXX)"
 APP_NAME="Seven7"
 DISPLAY_NAME="7记账"
 BUNDLE_ID="com.seven.bookkeeping"
@@ -15,8 +17,7 @@ SWIFT_FLAGS=(-target arm64-apple-ios$DEPLOY -sdk "$SDK" -swift-version 5 -O -who
              -Xfrontend -disable-availability-checking
              -F "$SDK/System/Library/Frameworks" -L "$SDK/usr/lib/swift" -I "$SDK/usr/include")
 
-echo "==> 清理"
-rm -rf "$BUILD"
+echo "==> 创建本机构建目录"
 mkdir -p "$BUILD/Payload"
 APP="$BUILD/Payload/Seven7.app"
 mkdir -p "$APP"
@@ -27,7 +28,8 @@ ATTR_FILE="$ROOT/Sources/LiveActivity/BookkeepingAttributes.swift"
 
 echo "==> 编译主程序"
 # shellcheck disable=SC2086
-swiftc "${SWIFT_FLAGS[@]}" $SOURCES_APP -o "$APP/$APP_NAME" 2>&1 | sed 's/^/   /'
+swiftc "${SWIFT_FLAGS[@]}" $SOURCES_APP -o "$APP/$APP_NAME" \
+  -Xlinker -weak_framework -Xlinker ScreenCaptureKit 2>&1 | sed 's/^/   /'
 echo "   ok: $(du -h "$APP/$APP_NAME" | cut -f1)"
 
 echo "==> 编译灵动岛扩展"
@@ -39,8 +41,8 @@ swiftc "${SWIFT_FLAGS[@]}" $SOURCES_WIDGET "$ATTR_FILE" \
 echo "   ok: $(du -h "$APP/PlugIns/SevenWidgets.appex/SevenWidgets" | cut -f1)"
 
 echo "==> 生成图标"
-python3 "$ROOT/tools/make_icon.py" "$ROOT/build/icons"
-ICON_DIR="$ROOT/build/icons"
+python3 "$ROOT/tools/make_icon.py" "$BUILD/icons"
+ICON_DIR="$BUILD/icons"
 ic() { cp "$ICON_DIR/$1" "$APP/$2"; }
 ic icon-120.png "AppIcon60x60@2x.png"
 ic icon-180.png "AppIcon60x60@3x.png"
@@ -64,7 +66,7 @@ cat > "$APP/Info.plist" <<PLIST
   <key>CFBundleName</key><string>$APP_NAME</string>
   <key>CFBundleLocalizations</key><array><string>zh-Hans</string><string>zh-Hant</string><string>en</string></array>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.2.23</string>
+  <key>CFBundleShortVersionString</key><string>1.3.0</string>
   <key>CFBundleVersion</key><string>2</string>
   <key>LSRequiresIPhoneOS</key><true/>
   <key>MinimumOSVersion</key><string>$DEPLOY</string>
@@ -86,9 +88,11 @@ cat > "$APP/Info.plist" <<PLIST
   <key>UIApplicationSceneManifest</key>
   <dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
   <key>NSSupportsLiveActivities</key><true/>
+  <key>UIBackgroundModes</key><array><string>screen-capture</string></array>
   <key>NSSupportsLiveActivitiesFrequentUpdates</key><true/>
   <key>ITSAppUsesNonExemptEncryption</key><false/>
   <key>NSPhotoLibraryUsageDescription</key><string>选择账单截图，自动识别金额与商户</string>
+  <key>NSScreenCaptureUsageDescription</key><string>在你主动开启的识屏会话中，本机识别微信和支付宝成功支付页并记账；不保存视频或上传画面。</string>
   <key>UIStatusBarStyle</key><string>UIStatusBarStyleDefault</string>
   <key>CFBundleIcons</key>
   <dict>
@@ -127,7 +131,7 @@ cat > "$APP/PlugIns/SevenWidgets.appex/Info.plist" <<PLIST
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>SevenWidgets</string>
   <key>CFBundlePackageType</key><string>XPC!</string>
-  <key>CFBundleShortVersionString</key><string>1.2.23</string>
+  <key>CFBundleShortVersionString</key><string>1.3.0</string>
   <key>CFBundleVersion</key><string>2</string>
   <key>MinimumOSVersion</key><string>$DEPLOY</string>
   <key>LSMinimumSystemVersion</key><string>$DEPLOY</string>
@@ -177,10 +181,11 @@ codesign --force --sign - --timestamp=none "$APP/PlugIns/SevenWidgets.appex" 2>&
 xattr -cr "$APP" 2>/dev/null || true
 codesign --force --sign - --timestamp=none "$APP" 2>&1 | sed 's/^/   /'
 xattr -cr "$BUILD/Payload" 2>/dev/null || true
-if codesign -v "$APP" 2>/dev/null && codesign -v "$APP/PlugIns/SevenWidgets.appex" 2>/dev/null; then
+if codesign --verify --strict "$APP" 2>/dev/null && codesign --verify --strict "$APP/PlugIns/SevenWidgets.appex" 2>/dev/null; then
   echo "   签名校验通过（主程序 + 扩展）"
 else
   echo "   ⚠️ 签名校验失败"
+  exit 1
 fi
 
 echo "==> 打包 ipa"
@@ -188,6 +193,8 @@ cd "$BUILD"
 rm -f 7jizhang.ipa
 zip -qrX 7jizhang.ipa Payload
 cd "$ROOT"
+mkdir -p "$ROOT/build"
+cp "$BUILD/7jizhang.ipa" "$ROOT/build/7jizhang.ipa"
 cp "$BUILD/7jizhang.ipa" "$ROOT/7记账.ipa"
 echo ""
 echo "✅ 完成: $ROOT/7记账.ipa  ($(du -h "$ROOT/7记账.ipa" | cut -f1))"

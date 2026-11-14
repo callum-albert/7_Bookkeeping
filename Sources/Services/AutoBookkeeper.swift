@@ -26,7 +26,7 @@ final class AutoBookkeeper {
     // MARK: - 核心入口
     @discardableResult
     func ingest(_ text: String, source: String = "自动",
-                trigger: LedgerStore.Trigger = .automatic) -> [Entry] {
+                trigger: LedgerStore.Trigger = .automatic, forceReview: Bool = false) -> [Entry] {
         let parsed = BillParser.parse(text)
         guard !parsed.isEmpty else {
             showToast("没识别到账单", "文本里需要包含微信支付/支付宝/银行卡与金额", .failed)
@@ -40,7 +40,8 @@ final class AutoBookkeeper {
         var ignoredReason: String?
         var ignoredCount = 0
 
-        for p in parsed {
+        for var p in parsed {
+            if forceReview { p.needsReview = true }
             switch store.ingest(p, trigger: trigger) {
             case .inserted(let e): inserted.append(e)
             case .merged(let e): merged.append(e)
@@ -64,7 +65,7 @@ final class AutoBookkeeper {
             } else if all.count > 1 {
                 showToast("已自动记账 \(total.moneyText)", "共 \(all.count) 笔", .success)
             } else if review {
-                showToast("已记账 \(first.amountText)", "\(first.merchant) · 待确认分类", .merged)
+                showToast("已记账 \(first.amountText)", "\(first.merchant) · 请核对识别结果", .merged)
             } else {
                 showToast("已自动记账 \(first.amountText)",
                           "\(first.merchant) · \(first.category.title)", .success)
@@ -98,17 +99,16 @@ final class AutoBookkeeper {
     private(set) var lastOCRText: String = ""
 
     func ingestImage(_ image: UIImage, source: String) async -> [Entry] {
-        let text = await OCRService.recognize(image)
+        let receipt = await OCRService.recognizeReceipt(image)
+        let text = receipt.text
         lastOCRText = text
-        let preview = text.replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespaces)
-        IntentLog.record("OCR(\(text.count)字): \(String(preview.prefix(70)))")
+        IntentLog.record("OCR：\(text.count)字，\(receipt.needsReview ? "待核对" : "字段完整")")
         guard !text.isEmpty else {
             showToast("图片里没找到文字", "试试更清晰的账单截图", .failed)
             return []
         }
         // 截图属于人工触发 → 用更宽的合并窗口 + 强去重
-        return ingest(text, source: source, trigger: .manual)
+        return ingest(text, source: source, trigger: .manual, forceReview: receipt.needsReview)
     }
 
     // MARK: - 剪贴板

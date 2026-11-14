@@ -32,146 +32,134 @@ enum BillParser {
         var balanceAfter: Int?
         /// date 是否为账单里的支付时间（false 表示用的是记账时刻）
         var hasPaidTime: Bool = false
+        var product: String = ""
+        var transactionID: String = ""
     }
 
     // MARK: - 模板化解析（微信 / 支付宝账单详情页）
     /// 账单详情页有一块固定结构：
     ///   当前状态 / 支付时间 / 商品 / 商户全称 / 收单机构 / 支付方式 / 交易单号 / 商户单号
     /// 只认这块里的标准字段，其它内容（交易服务、对订单有疑惑…）一律忽略。
-    private static let detailLabels = [
-        "当前状态", "支付时间", "交易时间", "付款时间", "消费时间",
-        "商品", "商户全称", "商户名称", "收单机构", "支付方式", "付款方式",
-        "交易单号", "商户单号", "订单号", "商家名称", "收款方"
+    static let detailLabels = [
+        "当前状态", "交易状态", "支付时间", "交易时间", "付款时间", "消费时间",
+        "创建时间", "订单时间", "交易类型", "商品说明", "商品名称", "商品", "商户全称", "商户名称",
+        "商家名称", "收款方", "收款商户", "收单机构", "支付方式", "付款方式",
+        "交易单号", "商户单号", "订单号", "实付金额", "实付款", "实际付款", "支付金额",
+        "付款金额", "交易金额", "订单金额", "优惠金额", "优惠", "服务费", "金额"
     ]
 
-    private static func isDetailLabelLine(_ line: String) -> String? {
-        detailLabels.first { label in
-            guard line.hasPrefix(label) else { return false }
-            let rest = String(line.dropFirst(label.count))
-            // 后面必须是空白/冒号，或者是真正的值（不能是「单号」这种同词根）
-            if rest.isEmpty { return true }
-            let t = rest.trimmingCharacters(in: .whitespaces)
-            if t.isEmpty { return true }
-            if t.hasPrefix(":") || t.hasPrefix("：") { return true }
-            // 「商户单号」会被 "商户" 前缀误命中，这里排除
-            if ["单号", "编号", "号："].contains(where: { t.hasPrefix($0) }) { return false }
-            return true
-        }
+    static func detailLabel(_ line: String) -> String? {
+        detailLabels.first { line.hasPrefix($0) }
     }
 
     private static func valueAfterLabel(_ line: String, _ label: String) -> String {
-        var rest = String(line.dropFirst(label.count))
-        rest = rest.trimmingCharacters(in: CharacterSet(charactersIn: " :：\t"))
-        return rest
+        String(line.dropFirst(label.count))
+            .trimmingCharacters(in: CharacterSet(charactersIn: " :：\t>›〉"))
     }
 
     static func parseDetailTemplate(_ text: String, now: Date = Date()) -> Parsed? {
         let lines = text.components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-
-        // 只要出现两个以上账单特征字段，就走模板（微信 / 支付宝账单详情页）
-        let markers = ["当前状态", "商户全称", "商户名称", "商家名称", "支付方式",
-                       "交易单号", "收单机构", "支付时间", "商品"]
-        let markerHits = markers.filter { m in lines.contains { $0.contains(m) } }
-        guard markerHits.count >= 2 else { return nil }
-
-        // 从第一个特征行开始，到「交易服务 / 账单服务」结束
-        var block: [String] = []
-        var started = false
-        for line in lines {
-            if !started, markers.contains(where: { line.contains($0) }) { started = true }
-            if !started { continue }
-            if line.hasPrefix("账单服务") || line.hasPrefix("交易服务") { break }
-            // 「商户单号 可在支持的商户扫码退款」这类只是提示，不参与流向判定
-            if line.contains("单号") && line.contains("退款") { continue }
-            block.append(line)
-        }
-        guard !block.isEmpty else { return nil }
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let labels = lines.compactMap { detailLabel($0) }
+        let identity = ["当前状态", "交易状态", "商户全称", "商户名称", "商家名称", "支付方式",
+                        "付款方式", "支付时间", "交易时间", "商品", "商品说明", "商品名称", "交易单号"]
+        let successLines = lines.filter { ["支付成功", "付款成功", "支付完成"].contains($0) }
+        let successPage = successLines.count == 1 && lines.contains { receiptAmount($0) != nil }
+        guard Set(labels).intersection(identity).count >= 2 || successPage else { return nil }
 
         var fields: [String: String] = [:]
-        for (i, line) in block.enumerated() {
-            guard let label = isDetailLabelLine(line) else { continue }
-            let inline = valueAfterLabel(line, label)
-            if !inline.isEmpty {
-                fields[label] = inline
-                continue
+        func valid(_ value: String, for label: String) -> Bool {
+            guard !value.isEmpty, detailLabel(value) == nil else { return false }
+            if label.contains("时间") { return extractFullDateTime(value) != nil }
+            if label.contains("方式") {
+                return extractChannel(value, source: .manual) != .unknown
+                    || ["零钱", "零钱通", "余额", "余额宝"].contains(value)
             }
-            // 值可能在相邻行（OCR 常把标签和值拆开，甚至值在上方）
-            let isTimeField = label.contains("时间")
-            var cands: [String] = []
-            for j in [i + 1, i - 1] where j >= 0 && j < block.count {
-                let cand = block[j]
-                if isDetailLabelLine(cand) != nil { continue }
-                if cand.isEmpty || cand.hasPrefix("¥") { continue }
-                // 时间字段的值本身就是日期，不能套用「排除日期」的过滤
-                if !isTimeField, !acceptable(cand, relaxed: true) { continue }
-                cands.append(cand)
+            if label.contains("状态") { return ["成功", "完成", "关闭", "退款", "待付款", "失败"].contains { value.contains($0) } }
+            if label.contains("金额") || ["金额", "实付款", "实际付款"].contains(label) {
+                return receiptAmount(value) != nil
             }
-            if let best = cands.max(by: { score($0) < score($1) }) {
-                fields[label] = best
+            if label.contains("单号") || label == "订单号" { return value.filter(\.isNumber).count >= 8 }
+            if label.hasPrefix("商品") {
+                return value.count <= 200 && !value.allSatisfy(\.isNumber)
+                    && extractFullDateTime(value) == nil && receiptAmount(value) == nil
+                    && extractChannel(value, source: .manual) == .unknown
+                    && !["支付成功", "交易成功", "付款成功", "账单", "交易服务", "账单服务"].contains(value)
             }
+            guard acceptable(value, relaxed: true), looksLikeMerchant(value),
+                  extractFullDateTime(value) == nil, receiptAmount(value) == nil,
+                  extractChannel(value, source: .manual) == .unknown,
+                  !["支付成功", "交易成功", "付款成功", "交易服务", "账单服务"].contains(value) else { return false }
+            return true
         }
+        // 同行字段最可靠；拆行时按类型约束取值，不再按字符串长度盲选。
+        for line in lines {
+            guard let label = detailLabel(line) else { continue }
+            let value = valueAfterLabel(line, label)
+            if !value.isEmpty { fields[label] = value }
+        }
+        for (i, line) in lines.enumerated() {
+            guard let label = detailLabel(line), fields[label] == nil else { continue }
+            let candidates = [i + 1, i - 1].filter { lines.indices.contains($0) }
+                .map { lines[$0] }.filter { valid($0, for: label) && !fields.values.contains($0) }
+            if let value = candidates.max(by: { score($0) < score($1) }) { fields[label] = value }
+        }
+        func field(_ keys: [String]) -> String {
+            keys.compactMap { fields[$0] }.first(where: { !$0.isEmpty }) ?? ""
+        }
+        // 实付字段 > 顶部独立金额 > 交易金额。优惠、余额、单号不参与候选。
+        let explicit = field(["实付金额", "实付款", "实际付款", "支付金额", "付款金额"])
+        let firstField = lines.firstIndex { detailLabel($0) != nil } ?? lines.count
+        let headerAmounts = lines.prefix(firstField).compactMap { receiptAmount($0) }
+        let amount = receiptAmount(explicit, allowInteger: true) ?? headerAmounts.first
+            ?? receiptAmount(field(["交易金额", "金额"]), allowInteger: true)
+        guard let amount, amount > 0 else { return nil }
 
-        // 金额：优先账单页顶部的「-27.60」「¥27.60」，最后才用通用规则
-        func toCents(_ t: String) -> Int? {
-            let d = t.replacingOccurrences(of: ",", with: "")
-            guard d.count <= 9, let v = Double(d), v > 0, v < 100_000_000 else { return nil }
-            return Int((v * 100).rounded())
-        }
-        var cents: Int? = nil
-        if let neg = firstMatch(#"[-−–]\s*([0-9][0-9,]*\.[0-9]{1,2})"#, in: text, group: 1) {
-            cents = toCents(neg)
-        }
-        if cents == nil, let yen = firstMatch(#"[¥￥]\s*([0-9][0-9,]*\.[0-9]{1,2})"#, in: text, group: 1) {
-            cents = toCents(yen)
-        }
-        if cents == nil { cents = extractAmount(text) }
-        guard let amount = cents, amount > 0 else { return nil }
-
-        let source = detectSource(text) ?? (text.contains("支付宝") ? .alipay : .wechat)
-        // 来源：优先用「商品」字段的值；没有商品时才用商户全称
-        var merchant = fields["商品"] ?? fields["商户名称"] ?? fields["商户全称"]
-            ?? fields["商家名称"] ?? fields["收款方"] ?? ""
-        // 仍为空：用账单页顶部的门店名（金额下方那行）
+        let product = field(["商品说明", "商品名称", "商品"])
+        var merchant = field(["商户全称", "商户名称", "商家名称", "收款方", "收款商户"])
         if merchant.isEmpty {
-            for (i, line) in lines.enumerated() where extractAmount(line) != nil {
-                if i + 1 < lines.count {
-                    let cand = lines[i + 1]
-                    if !cand.isEmpty, cand.count >= 2, isDetailLabelLine(cand) == nil {
-                        merchant = cand
-                    }
-                }
-                break
-            }
+            merchant = lines.prefix(firstField).first {
+                looksLikeMerchant($0) && !["账单", "账单详情", "交易详情", "微信支付", "支付宝", "支付成功", "付款成功", "支付完成", "完成", "返回", "更多"].contains($0)
+                    && receiptAmount($0) == nil && !$0.contains("交易")
+            } ?? ""
         }
-        let paymentText = fields["支付方式"] ?? fields["付款方式"] ?? ""
-        let timeText = fields["支付时间"] ?? fields["交易时间"] ?? fields["付款时间"] ?? fields["消费时间"] ?? ""
+        let payment = field(["支付方式", "付款方式"])
+        // 详情页出现银行名通常只是付款卡；不能据此把微信账单判为银行卡来源。
+        let source: Source
+        if text.contains("微信") {
+            source = .wechat
+        } else if text.contains("支付宝") || text.contains("花呗") {
+            source = .alipay
+        } else if ["零钱", "零钱通"].contains(payment) { source = .wechat
+        } else if payment.contains("余额") || fields["商品说明"] != nil { source = .alipay
+        } else if fields["商户单号"] != nil || (fields["当前状态"] != nil && fields["商户全称"] != nil && fields["收单机构"] != nil) { source = .wechat
+        } else { source = .manual }
+        let time = field(["支付时间", "交易时间", "付款时间", "消费时间"])
+        let paidDate = extractDate(time, now: now)
+        let channel = extractChannel("支付方式:" + payment, source: source)
+        let account = extractAccount(payment, source: source)
+        let status = field(["当前状态", "交易状态"])
+        let productFlow = classify(field(["交易类型"]) + " " + product)
+        let flow: Flow = status.contains("退款") ? .income : (productFlow == .expense ? classify(status) : productFlow)
+        let category = Category.guess(from: merchant + " " + product, merchant: merchant)
+        let ambiguous = Set(headerAmounts).count > 1 && explicit.isEmpty
+        return Parsed(amountCents: amount, source: source, category: category,
+                      merchant: merchant, account: account, date: paidDate ?? now,
+                      raw: text, flow: flow,
+                      needsReview: merchant.isEmpty || category == .other || channel == .unknown
+                          || paidDate == nil || source == .manual || ambiguous,
+                      channel: channel, balanceAfter: nil, hasPaidTime: paidDate != nil, product: product,
+                      transactionID: firstMatch(#"^[A-Za-z0-9]{10,64}$"#, in: field(["交易单号"])) ?? "")
+    }
 
-        let paidDate = extractDate(timeText.isEmpty ? text : timeText, now: now)
-            ?? extractPaidTime(text)
-            ?? extractFullDateTime(text)
-
-        let channel = extractChannel(paymentText.isEmpty ? text : paymentText, source: source)
-        let account = extractAccount(paymentText.isEmpty ? text : paymentText, source: source)
-        let flow = classify(block.joined(separator: " "))
-
-        return Parsed(
-            amountCents: amount,
-            source: source,
-            // 分类：用整块文本（含商户全称、商品、收单机构）来推断，不只是来源名
-            category: Category.guess(from: block.joined(separator: " ") + " " + merchant,
-                                     merchant: merchant.isEmpty ? nil : merchant),
-            merchant: merchant,
-            account: account,
-            date: paidDate ?? now,
-            raw: block.joined(separator: "\n"),
-            flow: flow,
-            needsReview: false,
-            channel: channel,
-            balanceAfter: extractBalance(text),
-            hasPaidTime: paidDate != nil
-        )
+    /// 只接受独立金额，避免把卡尾号、日期、订单号中的数字当成钱。
+    private static func receiptAmount(_ text: String, allowInteger: Bool = false) -> Int? {
+        let t = text.trimmingCharacters(in: .whitespaces)
+        guard let value = firstMatch(#"^(?:[¥￥]\s*)?[-−–+]?\s*(?:[¥￥]\s*)?([0-9]{1,7}(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)\s*(?:元)?$"#, in: t, group: 1),
+              let d = Decimal(string: value.replacingOccurrences(of: ",", with: "")), d > 0, d < 1_000_000 else { return nil }
+        // 无货币符号/正负号的整数可能是页码、卡号，不能作为顶部金额。
+        guard allowInteger || t.contains(".") || t.contains("¥") || t.contains("￥") || t.contains("元") || t.hasPrefix("-") || t.hasPrefix("−") else { return nil }
+        return NSDecimalNumber(decimal: d * 100).intValue
     }
 
     // MARK: - 主入口
@@ -179,13 +167,21 @@ enum BillParser {
         let cleaned = normalize(text)
 
         // ① 账单详情页 → 走模板解析（最可靠）
-        if let t = parseDetailTemplate(cleaned, now: now), t.flow == .expense {
+        if cleaned.components(separatedBy: .newlines).contains(where: {
+            firstMatch(#"^\s*(?:(?:当前状态|交易状态)\s*:?\s*)?(?:待付款|等待付款|支付失败|交易关闭|交易失败|已关闭)\s*$"#, in: $0) != nil
+        }) { return [] }
+        if let t = parseDetailTemplate(cleaned, now: now) {
             return [t]
         }
+        // 已识别为详情页却找不到可靠交易金额时，不用优惠、余额等数字兜底。
+        let receiptLabels = Set(cleaned.components(separatedBy: .newlines).compactMap { detailLabel($0.trimmingCharacters(in: .whitespaces)) })
+        if receiptLabels.contains("支付方式") || receiptLabels.contains("付款方式"),
+           receiptLabels.contains("商户全称") || receiptLabels.contains("商品说明") || receiptLabels.contains("支付时间") { return [] }
         guard !cleaned.isEmpty else { return [] }
 
         // 整体流向判定（决定这笔到底记不记）
         let wholeFlow = classify(cleaned)
+        let transactionLines = cleaned.components(separatedBy: .newlines).filter { extractAmount($0) != nil }.count
 
         let lines = cleaned
             .components(separatedBy: .newlines)
@@ -214,7 +210,7 @@ enum BillParser {
 
             // 单行可能是收入（列表中混着收款），逐行再判定一次
             let lineFlow = classify(line)
-            let flow: Flow = (lineFlow == .expense && wholeFlow != .expense) ? lineFlow : lineFlow
+            let flow: Flow = transactionLines > 1 || strongExpense.contains(where: { line.contains($0) }) ? lineFlow : wholeFlow
 
             let merchant = extractMerchant(line, full: cleaned) ?? ""
             var account = extractAccount(line, source: source)
@@ -578,6 +574,7 @@ enum BillParser {
         if s.contains("零钱通") { parts.append("零钱通") }
         else if s.contains("零钱") { parts.append("零钱") }
         if s.contains("余额宝") { parts.append("余额宝") }
+        else if source == .alipay && s.contains("余额") { parts.append("余额") }
         if s.contains("花呗") { parts.append("花呗") }
         if s.contains("信用卡") && !parts.contains(where: { $0.contains("银行") }) { parts.append("信用卡") }
 
@@ -595,7 +592,8 @@ enum BillParser {
             return .wechatZero
         }
         if s.contains("余额宝支付") || s.contains("支付方式:余额")
-            || (s.contains("余额宝") && s.contains("支付方式")) {
+            || (s.contains("余额宝") && s.contains("支付方式"))
+            || (source == .alipay && s.contains("余额") && s.contains("支付方式")) {
             return .alipayBalance
         }
         if s.contains("信用卡") { return .creditCard }
@@ -617,13 +615,15 @@ enum BillParser {
 
     // MARK: - 时间提取
     private static let dateFormatters: [DateFormatter] = {
-        let formats = ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy/MM/dd HH:mm",
+        let formats = ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy/MM/dd HH:mm:ss", "yyyy/MM/dd HH:mm",
                        "yyyy年M月d日 HH:mm:ss", "yyyy年M月d日 HH:mm", "yyyy年M月d日HH:mm:ss",
                        "M月d日 HH:mm", "MM-dd HH:mm", "yyyy年M月d日HH:mm"]
         return formats.map { f in
             let df = DateFormatter()
             df.locale = Locale(identifier: "zh_CN")
             df.dateFormat = f
+            df.isLenient = false
+            df.timeZone = TimeZone(identifier: "Asia/Shanghai")
             return df
         }
     }()
@@ -656,7 +656,7 @@ enum BillParser {
 
     static func extractDate(_ s: String, now: Date) -> Date? {
         // 先尝试完整的「日期 + 时间」片段（含秒）
-        if let full = firstMatch(#"([0-9]{2,4}[-/年][0-9]{1,2}[-/月][0-9]{1,2}日?\s+[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)"#,
+        if let full = firstMatch(#"([0-9]{2,4}[-/年][0-9]{1,2}[-/月][0-9]{1,2}日?\s*[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)"#,
                                  in: s, group: 1) {
             for df in dateFormatters {
                 if let d = df.date(from: full) { return fixYearIfNeeded(d, now: now) }

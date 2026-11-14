@@ -59,6 +59,7 @@ def shortcut_input():
 
 def base_dict(actions, name, glyph=59511, input_types=None):
     d = {
+        "WFWorkflowName": name,
         "WFWorkflowActions": actions,
         "WFWorkflowClientRelease": "3.0",
         "WFWorkflowClientVersion": "1230",
@@ -82,8 +83,13 @@ def base_dict(actions, name, glyph=59511, input_types=None):
 def write(name, payload):
     path = os.path.join(OUT, name)
     with open(path, "wb") as f:
-        plistlib.dump(payload, f, fmt=plistlib.FMT_XML, sort_keys=False)
+        plistlib.dump(payload, f, fmt=plistlib.FMT_BINARY, sort_keys=False)
     print("生成:", path, os.path.getsize(path), "bytes")
+
+
+recent = intent_action("RecordRecentScreenshotIntent", {}, str(uuid.uuid4()).upper())
+write("7记账-新截图自动记账.shortcut",
+      base_dict([recent], "7记账-新截图自动记账", glyph=59683))
 
 
 # ── 1. 侧边按钮：截屏 → 识别截图记账
@@ -111,4 +117,4 @@ write("7记账-账单文本记账.shortcut",
       base_dict([text], "7记账-账单文本记账", glyph=59511,
                 input_types=["WFStringContentItem"]))
 
-print("\n完成。导入方法：把文件 AirDrop 或放进「文件」App，点击即可导入到快捷指令。")
+print("\n完成：以上为未签名源文件；先用 shortcuts sign 签名后分发，或按 App 内说明手动创建。")

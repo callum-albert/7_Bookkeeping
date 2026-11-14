@@ -19,6 +19,21 @@ FORMAT_VERSION = "3.0"
 # 已注册的 App Intent：intent 类型名 / 显示标题 / 描述 / 参数
 INTENTS = [
     {
+        "identifier": "RecordFromImageIntent",
+        "title": "识别截图记账",
+        "description": "从传入的账单截图识别金额、商户、商品及支付方式",
+        "parameters": [
+            {"name": "image", "intents_type": 12, "optional": False,
+             "title": "截图", "description": "传入截屏动作的结果"}
+        ],
+    },
+    {
+        "identifier": "RecordRecentScreenshotIntent",
+        "title": "自动识别刚截的账单",
+        "description": "关闭微信或支付宝后，仅识别90秒内的新截图；需先截屏并提前授权相册",
+        "parameters": [],
+    },
+    {
         "identifier": "ParseClipboardIntent",
         "title": "从剪贴板自动记账",
         "description": "读取剪贴板里的微信/支付宝/银行账单并自动入账",
@@ -62,7 +77,9 @@ def param_entry(p):
         "resolvableInputTypes": [],
         "title": {"alternatives": [], "key": p.get("title", p["name"])},
         "typeSpecificMetadata": [],
-        "valueType": {"primitive": {"wrapper": {"typeIdentifier": p["primitive"]}}},
+        "valueType": ({"intents": {"wrapper": {"typeIdentifier": p["intents_type"]}}}
+                      if "intents_type" in p else
+                      {"primitive": {"wrapper": {"typeIdentifier": p["primitive"]}}}),
     }
 
 

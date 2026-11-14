@@ -60,7 +60,7 @@ struct SettingsView: View {
                 symbol: "bolt.fill",
                 tint: Theme.mint,
                 title: "自动记账",
-                detail: "银行短信 / 邮件 / 剪贴板",
+                detail: "授权识屏 / 银行短信 / 截图辅助",
                 badge: "需设置一次",
                 destination: AutoSetupView()
             )

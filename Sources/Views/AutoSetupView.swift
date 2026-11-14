@@ -18,45 +18,61 @@ struct AutoSetupView: View {
         ScrollView {
             VStack(spacing: 16) {
                 openShortcutsButton
+                if #available(iOS 27.0, *) { ScreenSessionView() }
                 intro
                 channel(
                     badge: "A", badgeTint: Theme.mint,
                     title: "银行短信",
                     subtitle: "覆盖微信 / 支付宝绑卡支付",
-                    needSetup: "需要设置：一次性，之后全自动",
+                    needSetup: "需要银行确实发送消费短信；提醒门槛以下可能漏记",
                     steps: [
                         "打开「快捷指令」App，点屏幕底部「自动化」标签（不是「快捷指令」标签）",
                         "右上角「+」→ 触发器列表里找「通信」分组 → 点「信息」",
                         "发件人点「添加」，填你的银行号码（下表）",
-                        "「信息包含」填：消费",
+                        "「信息包含」按实际银行短信设置，如「消费」或「支出」；不同措辞分别建自动化",
                         "右上角「下一步」→ 添加操作 → 搜「7记账」→ 解析账单文本记账",
-                        "点动作里的「账单文本」→ 选「快捷指令输入」",
-                        "完成后点开这条自动化，关闭「运行前询问」"
+                        "点动作里的「账单文本」→ 选「快捷指令输入」中的信息正文，先用真实消费短信测试",
+                        "触发方式选「立即运行」（旧系统为关闭「运行前询问」），先解锁运行一次授权"
                     ],
                     extra: AnyView(bankList)
                 )
                 channel(
                     badge: "B", badgeTint: Theme.brand,
                     title: "银行邮件",
-                    subtitle: "信息最全，带商户名",
-                    needSetup: "需要设置：先开通银行邮件提醒，再配自动化",
+                    subtitle: "取决于银行是否提供逐笔消费邮件",
+                    needSetup: "先验证自动化能传入邮件正文；仅有发件人或主题不够",
                     steps: [
-                        "手机银行 / 网银里开通「消费邮件提醒」（免费）",
+                        "先向银行确认是否提供逐笔消费邮件提醒，月度账单不等于实时提醒",
                         "自动化 → 新建 → 选「电子邮件」",
                         "发件人填银行邮箱，主题包含「消费」",
-                        "操作选「解析账单文本记账」，参数传「输入」"
+                        "操作选「解析账单文本记账」，传入正文；若系统无法提供正文，此通道不可用"
                     ],
                     extra: AnyView(EmptyView())
                 )
                 channel(
                     badge: "C", badgeTint: Theme.warm,
                     title: "剪贴板",
-                    subtitle: "复制微信/支付宝通知后自动入账",
-                    needSetup: "需要设置：一次性",
+                    subtitle: "需要先手动复制账单文本",
+                    needSetup: "这是复制后的辅助记账，不会读取微信通知",
                     steps: [
                         "自动化 → 新建 → 选「App」→ 微信或支付宝 →「关闭时」",
                         "操作选「7记账 - 从剪贴板自动记账」",
-                        "关闭「运行前询问」"
+                        "选「立即运行」；每次先复制本次账单，避免读取旧剪贴板"
+                    ],
+                    extra: AnyView(EmptyView())
+                )
+
+                channel(
+                    badge: "D", badgeTint: Theme.brand,
+                    title: "截屏后退出即记账",
+                    subtitle: "零钱 / 余额支付的辅助入口",
+                    needSetup: "仍需截一次屏；无需再长按操作按钮",
+                    steps: [
+                        "先在「快捷指令」中运行「用最新截图记账」，允许读取相册，并完成一次截图识别",
+                        "快捷指令 → 自动化 → App → 微信、支付宝 →「关闭时」→「立即运行」",
+                        "动作选择「7记账 - 自动识别刚截的账单」",
+                        "付款后停留在支付成功或账单详情页，正常截屏，再退出支付 App",
+                        "只处理最近90秒内的新截图；没截屏、相册未授权或锁屏受限时不会记账"
                     ],
                     extra: AnyView(EmptyView())
                 )
@@ -102,10 +118,10 @@ struct AutoSetupView: View {
                 Image(systemName: "bolt.fill")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(Theme.mint)
-                Text("不需要打开 App，钱一花就记好")
+                Text("识屏会话自动记，短信与截图可补充")
                     .font(.system(size: 13, weight: .semibold))
             }
-            Text("三条通道任选其一即可，配置一次长期有效。三条都配也可以，同一笔会自动去重。")
+            Text("iOS 27 可先授权开启识屏会话，再自动识别成功支付页。不开启识屏时，绑卡消费可用银行短信自动化，零钱、余额消费可用截图辅助。多个入口可同时使用，同一笔会自动去重。")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -218,7 +234,7 @@ struct AutoSetupView: View {
     }
 
     private var note: some View {
-        Text("为什么不能直接读微信通知？iOS 不向第三方 App 开放其他 App 的通知内容，这是系统限制。上面三条通道是当前能做到的最优组合。")
+        Text("App 关闭自动化只能知道你退出了 App，不能知道是否付款，也不能截取退出前的支付页。录屏需要用户明确开启；微信、支付宝商户接口不能读取个人在其他商户的消费账单。")
             .font(.system(size: 10))
             .foregroundStyle(.tertiary)
             .fixedSize(horizontal: false, vertical: true)

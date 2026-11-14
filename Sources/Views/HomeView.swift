@@ -43,7 +43,7 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(pendingReview.count) 笔待确认")
                         .font(.system(size: 13, weight: .semibold))
-                    Text("只有银行短信，没有商户信息，点这里补全分类")
+                    Text("部分识别信息需要核对，点这里检查账单")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -594,7 +594,7 @@ struct EntryDetailView: View {
                             .font(.system(size: 13))
                             .foregroundStyle(Theme.brand)
                             .frame(width: 22)
-                        Text("来源")
+                        Text("商户")
                             .font(.system(size: 14))
                         Spacer(minLength: 8)
                         TextField("商户名称", text: merchantBinding)
@@ -606,6 +606,11 @@ struct EntryDetailView: View {
                     .padding(.vertical, 13)
 
                     Divider().padding(.leading, 16)
+
+                    if !entry.product.isEmpty {
+                        detailRow("商品", entry.product, symbol: "bag")
+                        Divider().padding(.leading, 16)
+                    }
 
                     // 时间（可改）
                     HStack(spacing: 10) {

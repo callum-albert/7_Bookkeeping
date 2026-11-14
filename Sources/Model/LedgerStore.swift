@@ -104,15 +104,20 @@ final class LedgerStore {
         }
 
         // 2) 找候选：金额相同 + 时间接近
+        if !p.transactionID.isEmpty, let same = entries.first(where: {
+            $0.source == p.source && $0.transactionID == p.transactionID
+        }) { return .duplicate(same) }
         //    自动触发 5 分钟；手动触发 30 分钟（人按按钮可能晚一点）
         let candidates = entries.filter {
             $0.amountCents == p.amountCents
             && abs($0.date.timeIntervalSince(p.date)) <= trigger.window
+            && !($0.source == p.source && !$0.transactionID.isEmpty && !p.transactionID.isEmpty && $0.transactionID != p.transactionID)
         }
 
         // 3) 强重复：极短时间内同金额，且至少一方信息模糊 → 同一笔
         //    覆盖「连按两次按钮」和「银行短信与手动记账几乎同时到达」
         if let same = candidates.first(where: { e in
+            if (e.source == .wechat && p.source == .alipay) || (e.source == .alipay && p.source == .wechat) { return false }
             let dt = abs(e.date.timeIntervalSince(p.date))
             guard dt <= trigger.strongWindow else { return false }
             guard isVague(e) || isVague(p) else { return false }
@@ -179,7 +184,7 @@ final class LedgerStore {
             account: p.account,
             needsReview: p.needsReview,
             channel: p.channel,
-            hasPaidTime: p.hasPaidTime
+            hasPaidTime: p.hasPaidTime, product: p.product, transactionID: p.transactionID
         )
         add(entry)
 
@@ -197,21 +202,22 @@ final class LedgerStore {
     }
 
     private func canMerge(_ existing: Entry, _ p: BillParser.Parsed) -> Bool {
+        if (existing.source == .wechat && p.source == .alipay) || (existing.source == .alipay && p.source == .wechat) { return false }
         // 同一平台：只有商户也对得上才合并（否则是真的两笔）
         if existing.source == p.source {
             return fuzzyMatch(existing.merchant, p.merchant)
         }
         // 跨平台：任意一方信息模糊（银行短信无商户 / 待确认）即可合并
         let existingVague = existing.merchant.isEmpty
-            || existing.needsReview
             || existing.source == .bank
-        let newVague = p.merchant.isEmpty || p.needsReview || p.source == .bank
+        let newVague = p.merchant.isEmpty || p.source == .bank
         if existingVague || newVague { return true }
         return fuzzyMatch(existing.merchant, p.merchant)
     }
 
     /// 合并两个渠道的同一笔消费，保留信息更全的一方
     private func merge(_ e: inout Entry, with p: BillParser.Parsed) {
+        let wasReview = e.needsReview
         // 交易时间取更早的（通知可能延迟）；任一方是真实支付时间就采用
         if p.hasPaidTime && !e.hasPaidTime {
             e.date = p.date
@@ -221,12 +227,15 @@ final class LedgerStore {
         }
 
         // 商户：优先「具体商户名」，跳过「微信支付 / 银行卡」这类来源名
-        let newIsConcrete = !p.merchant.isEmpty && p.merchant != p.source.title && !p.needsReview
-        let oldIsConcrete = !e.merchant.isEmpty && e.merchant != e.source.title && !e.needsReview
+        let newIsConcrete = !p.merchant.isEmpty && p.merchant != p.source.title
+        let oldIsConcrete = !e.merchant.isEmpty && e.merchant != e.source.title
         if newIsConcrete && (!oldIsConcrete || p.merchant.count > e.merchant.count) {
             e.merchant = p.merchant
             e.category = p.category == .other ? e.category : p.category
         }
+
+        if !p.product.isEmpty { e.product = p.product }
+        if e.transactionID.isEmpty { e.transactionID = p.transactionID }
 
         // 渠道信息累加：招商银行(1234) · 零钱
         if !p.account.isEmpty, !e.account.contains(p.account) {
@@ -250,19 +259,19 @@ final class LedgerStore {
         }
 
         // 商户仍然只是来源名 → 仍需确认
-        e.needsReview = e.merchant.isEmpty || e.merchant == e.source.title || (e.source == .bank && e.merchant.count < 2)
+        e.needsReview = (newIsConcrete && p.source != .bank ? p.needsReview : wasReview)
+            || e.merchant.isEmpty || e.merchant == e.source.title || (e.source == .bank && e.merchant.count < 2)
     }
 
     /// 信息是否模糊（没有可用商户名，或来自银行短信）
     private func isVague(_ e: Entry) -> Bool {
         e.merchant.isEmpty
-            || e.needsReview
             || e.source == .bank
             || e.merchant == e.source.title
     }
 
     private func isVague(_ p: BillParser.Parsed) -> Bool {
-        p.merchant.isEmpty || p.needsReview || p.source == .bank
+        p.merchant.isEmpty || p.source == .bank
     }
 
     private func channelPriority(_ c: PayChannel) -> Int {
