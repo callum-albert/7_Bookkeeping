@@ -5,13 +5,21 @@ import Photos
 
 /// 记录 App Intent 的执行结果，便于在 App 内排查「按了按钮却没记上」
 enum IntentLog {
-    private static let key = "lastIntentLog"
+    private static let key = "intentLogLines"
 
-    static var last: String? { UserDefaults.standard.string(forKey: key) }
+    static var lines: [String] { UserDefaults.standard.stringArray(forKey: key) ?? [] }
+    static var last: String? { lines.last }
 
     static func record(_ text: String) {
-        let stamp = Date().formatted(date: .omitted, time: .shortened)
-        UserDefaults.standard.set("[\(stamp)] \(text)", forKey: key)
+        let stamp = Date().formatted(date: .omitted, time: .standard)
+        var arr = lines
+        arr.append("[\(stamp)] \(text)")
+        if arr.count > 6 { arr = Array(arr.suffix(6)) }
+        UserDefaults.standard.set(arr, forKey: key)
+    }
+
+    static func clear() {
+        UserDefaults.standard.removeObject(forKey: key)
     }
 }
 

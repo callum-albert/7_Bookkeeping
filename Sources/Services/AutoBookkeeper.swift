@@ -95,8 +95,14 @@ final class AutoBookkeeper {
         return []
     }
 
+    private(set) var lastOCRText: String = ""
+
     func ingestImage(_ image: UIImage, source: String) async -> [Entry] {
         let text = await OCRService.recognize(image)
+        lastOCRText = text
+        let preview = text.replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+        IntentLog.record("OCR(\(text.count)字): \(String(preview.prefix(70)))")
         guard !text.isEmpty else {
             showToast("图片里没找到文字", "试试更清晰的账单截图", .failed)
             return []
