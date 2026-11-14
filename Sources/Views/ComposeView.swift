@@ -68,15 +68,32 @@ struct ComposeView: View {
             }
             .safeAreaInset(edge: .bottom) {
                 Button { save() } label: {
-                    Text("保存这一笔")
-                        .font(.system(size: 16, weight: .semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
+                    HStack(spacing: 8) {
+                        if amountCents > 0 {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 15, weight: .semibold))
+                        }
+                        Text("保存这一笔")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 15)
+                    .glassEffect(.regular.tint(Theme.brand.opacity(0.82)).interactive(),
+                                 in: .rect(cornerRadius: 22))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .stroke(
+                                LinearGradient(colors: [.white.opacity(0.55), .white.opacity(0.08)],
+                                               startPoint: .top, endPoint: .bottom),
+                                lineWidth: 0.9
+                            )
+                    }
+                    .shadow(color: Theme.brand.opacity(0.35), radius: 16, y: 8)
                 }
-                .buttonStyle(.glassProminent)
-                .tint(Theme.brand)
-                .controlSize(.large)
-                .opacity(amountCents > 0 ? 1 : 0.55)
+                .buttonStyle(.plain)
+                .opacity(amountCents > 0 ? 1 : 0.62)
+                .animation(.easeOut(duration: 0.2), value: amountCents > 0)
                 .disabled(amountCents <= 0)
                 .padding(.horizontal, 18)
                 .padding(.bottom, 10)
