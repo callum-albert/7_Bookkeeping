@@ -3,6 +3,18 @@ import AppIntents
 import UIKit
 import Photos
 
+/// 记录 App Intent 的执行结果，便于在 App 内排查「按了按钮却没记上」
+enum IntentLog {
+    private static let key = "lastIntentLog"
+
+    static var last: String? { UserDefaults.standard.string(forKey: key) }
+
+    static func record(_ text: String) {
+        let stamp = Date().formatted(date: .omitted, time: .shortened)
+        UserDefaults.standard.set("[\(stamp)] \(text)", forKey: key)
+    }
+}
+
 // MARK: - 解析文本记账（给快捷指令/自动化用）
 struct RecordFromTextIntent: AppIntent {
     static var title: LocalizedStringResource = "解析账单文本记账"
@@ -19,7 +31,9 @@ struct RecordFromTextIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
         // 不返回 dialog：避免快捷指令弹出「完成」对话框，结果通过灵动岛/通知呈现
+        IntentLog.record("文本记账：输入 \(text.count) 字")
         let entries = AutoBookkeeper.shared.ingest(text, source: "快捷指令", trigger: .manual)
+        IntentLog.record(entries.isEmpty ? "文本记账：未识别到账单" : "文本记账：成功 \(entries.count) 笔")
         let total = entries.reduce(0) { $0 + $1.amountCents }
         return .result(value: entries.isEmpty ? "0" : total.moneyText)
     }
@@ -83,10 +97,16 @@ struct RecordFromLatestScreenshotIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
+        IntentLog.record("最新截图：开始读取相册")
         guard let image = await ScreenshotReader.latest() else {
+            IntentLog.record("最新截图：读不到图片（相册权限被拒或相册为空）")
             return .result()
         }
-        _ = await AutoBookkeeper.shared.ingestImage(image, source: "最新截图")
+        IntentLog.record("最新截图：已读取 \(Int(image.size.width))×\(Int(image.size.height))，开始 OCR")
+        let entries = await AutoBookkeeper.shared.ingestImage(image, source: "最新截图")
+        IntentLog.record(entries.isEmpty
+            ? "最新截图：OCR 后未识别到账单"
+            : "最新截图：记账成功 \(entries.reduce(0) { $0 + $1.amountCents }.moneyText)")
         return .result()
     }
 }
@@ -103,21 +123,18 @@ enum ScreenshotReader {
         guard let asset = PHAsset.fetchAssets(with: .image, options: opts).firstObject else { return nil }
 
         return await withCheckedContinuation { cont in
-            let req = PHImageRequestOptions()
-            req.isSynchronous = false
-            req.deliveryMode = .highQualityFormat
-            req.resizeMode = .none
             var resumed = false
-            PHImageManager.default().requestImage(
-                for: asset,
-                targetSize: CGSize(width: 1600, height: 1600),
-                contentMode: .aspectFit,
-                options: req
-            ) { img, info in
-                let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
-                if degraded || resumed { return }
+            let opts = PHImageRequestOptions()
+            opts.isNetworkAccessAllowed = true
+            opts.deliveryMode = .highQualityFormat
+            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: opts) { data, _, _, _ in
+                guard !resumed else { return }
                 resumed = true
-                cont.resume(returning: img)
+                if let data, let img = UIImage(data: data) {
+                    cont.resume(returning: img)
+                } else {
+                    cont.resume(returning: nil)
+                }
             }
         }
     }

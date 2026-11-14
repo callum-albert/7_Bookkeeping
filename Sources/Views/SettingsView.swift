@@ -27,6 +27,21 @@ struct SettingsView: View {
         ScrollView {
             VStack(spacing: 16) {
                 methodsCard
+                if let log = UserDefaults.standard.string(forKey: "lastIntentLog") {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "terminal.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                        Text(log)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .glassEffect(.regular, in: .rect(cornerRadius: 14))
+                }
                 balanceCard
                 dataCard
                 islandCard
