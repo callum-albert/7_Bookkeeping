@@ -570,6 +570,7 @@ struct EntryDetailView: View {
                             Button {
                                 entry.category = c
                                 entry.needsReview = false
+                                Category.MerchantMemory.remember(entry.merchant, c)
                                 store.update(entry)
                             } label: {
                                 Label(c.title, systemImage: c.symbol)

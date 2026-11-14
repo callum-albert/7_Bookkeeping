@@ -242,7 +242,8 @@ enum BillParser {
 
     /// 在整段文本里按「标签行」取字段值，兼容三种排布：
     ///   「商户全称 上海巷鱼」 / 「商户全称\n上海巷鱼」 / 「上海巷鱼\n商户全称」
-    private static func fieldValue(in text: String, labels: [String]) -> String? {
+    /// - Parameter relaxed: 放宽过滤（用于「商户全称」这类权威字段，只要不是明显噪音就采用）
+    private static func fieldValue(in text: String, labels: [String], relaxed: Bool = false) -> String? {
         let lines = text.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
@@ -266,17 +267,37 @@ enum BillParser {
             if let r = line.range(of: label) {
                 let rest = String(line[r.upperBound...])
                     .trimmingCharacters(in: CharacterSet(charactersIn: " :：·-"))
-                if rest.count >= 2, !isNoiseMerchant(rest), !isFieldLabel(rest) { return rest }
+                if rest.count >= 2, acceptable(rest, relaxed: relaxed) { return rest }
             }
 
-            // b) 上下相邻行都看，取「更像商户名」且更长的那个
+            // b) 上下相邻行都看，取更像商户名的那个
             var candidates: [String] = []
             if i + 1 < lines.count { candidates.append(lines[i + 1]) }
             if i - 1 >= 0 { candidates.append(lines[i - 1]) }
-            let valid = candidates.filter { looksLikeMerchant($0) }
-            if let best = valid.max(by: { $0.count < $1.count }) { return best }
+            let valid = candidates.filter { acceptable($0, relaxed: relaxed) }
+            if let best = valid.max(by: { score($0) < score($1) }) { return best }
         }
         return nil
+    }
+
+    /// 候选值是否可接受
+    private static func acceptable(_ t: String, relaxed: Bool) -> Bool {
+        guard t.count >= 2, t.count <= 40 else { return false }
+        if isFieldLabel(t) { return false }
+        if t.allSatisfy({ $0.isNumber }) { return false }          // 纯数字
+        if t.contains("单号") || t.contains("退款") || t.contains("扫码") { return false }
+        if t.contains("年") && t.contains("月") { return false }    // 日期
+        if relaxed { return true }
+        return looksLikeMerchant(t)
+    }
+
+    /// 商户名特征打分：越像商户分越高
+    private static func score(_ t: String) -> Int {
+        var s = t.count
+        let hints = ["餐厅", "店", "公司", "商行", "超市", "餐饮", "酒店", "科技",
+                     "百货", "广场", "中心", "银行", "集团", "工作室", "服务部"]
+        if hints.contains(where: { t.contains($0) }) { s += 50 }
+        return s
     }
 
     /// 判断某行是否像商户名（用于 OCR 值/标签错位的取舍）
@@ -305,14 +326,18 @@ enum BillParser {
     }
 
     static func extractMerchant(_ line: String, full: String) -> String? {
-        // ① 行级双向匹配（最可靠，兼容 OCR 行序）
-        if let v = fieldValue(in: full, labels: ["商户全称", "商户名称", "收款商户", "收款方", "支付对象"]) {
+        // ① 权威字段优先（放宽过滤，只要不是明显噪音就采用）
+        if let v = fieldValue(in: full, labels: ["商户全称", "商户名称"], relaxed: true) {
+            return v
+        }
+        if let v = fieldValue(in: full, labels: ["收款方", "收款商户", "支付对象"], relaxed: true) {
             return v
         }
         if let v = fieldValue(in: full, labels: ["商户"]) {
             return v
         }
-        if let v = fieldValue(in: full, labels: ["商品"]) {
+        // ④ 最后才用商品 / 订单名兜底
+        if let v = fieldValue(in: full, labels: ["商品", "订单"]) {
             return v
         }
 

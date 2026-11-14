@@ -368,6 +368,65 @@ let fb = BillParser.parse(fullBill).first
 check("㉘ 商户不取单号/退款说明", fb?.merchant == "上海巷鱼餐饮管理服务有限公司", fb?.merchant ?? "nil")
 check("㉙ 分类为餐饮", fb?.category == .food, "\(String(describing: fb?.category))")
 
+print("\n── 18. 同时有「商品」和「商户全称」时优先商户全称 ──")
+let twoFields1 = """
+支付宝 账单
+-88.00
+商品
+美团收银12345678
+商户全称
+杭州知味观餐饮有限公司
+支付时间
+2026年11月12日18:20:05
+"""
+let mf1 = BillParser.parse(twoFields1).first
+check("㉚ 商品在前也优先商户全称", mf1?.merchant == "杭州知味观餐饮有限公司", mf1?.merchant ?? "nil")
+check("㉛ 分类为餐饮", mf1?.category == .food, "\(String(describing: mf1?.category))")
+
+let twoFields2 = """
+支付宝
+-66.00
+商户全称 深圳海底捞餐饮管理有限公司
+商品 海底捞火锅
+支付时间 2026年11月11日12:30:00
+"""
+let mf2 = BillParser.parse(twoFields2).first
+check("㉜ 同行格式优先商户全称", mf2?.merchant == "深圳海底捞餐饮管理有限公司", mf2?.merchant ?? "nil")
+
+print("\n── 19. 新场景：滴滴 / 交通卡 ──")
+let didi = """
+支付宝
+-23.50
+商品
+先乘车后付款
+商户全称
+广州启安科技有限公司
+支付时间
+2026年11月12日08:15:00
+"""
+let d1 = BillParser.parse(didi).first
+check("㉝ 滴滴商户取公司名", d1?.merchant == "广州启安科技有限公司", d1?.merchant ?? "nil")
+check("㉞ 靠「乘车」判为交通", d1?.category == .transport, "\(String(describing: d1?.category))")
+
+let metroCard = """
+支付宝
+-50.00
+商品
+上海交通卡自动续费
+商户全称
+上海公共交通卡股份有限公司
+支付时间
+2026年11月10日09:00:00
+"""
+let d2 = BillParser.parse(metroCard).first
+check("㉟ 交通卡自动续费判为交通", d2?.category == .transport, "\(String(describing: d2?.category))")
+
+// 商户记忆：用户教一次后自动沿用
+Category.MerchantMemory.remember("广州启安科技有限公司", .transport)
+check("㊱ 商户记忆生效",
+      Category.guess(from: "随便什么文本", merchant: "广州启安科技有限公司") == .transport,
+      "\(Category.guess(from: "x", merchant: "广州启安科技有限公司"))")
+
 print("\n─────────────────────────────")
 print("通过 \(pass) / \(pass + fail)")
 exit(fail == 0 ? 0 : 1)

@@ -104,8 +104,52 @@ enum Category: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    /// 商户 → 分类记忆：用户改过一次，以后同一商户自动沿用
+    enum MerchantMemory {
+        private static let key = "merchantCategoryMap"
+
+        static var all: [String: String] {
+            UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+        }
+
+        static func normalize(_ s: String) -> String {
+            s.lowercased()
+                .replacingOccurrences(of: "有限责任公司", with: "")
+                .replacingOccurrences(of: "有限公司", with: "")
+                .replacingOccurrences(of: "股份有限公司", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        static func category(for merchant: String) -> Category? {
+            let k = normalize(merchant)
+            guard k.count >= 2, let raw = all[k] else { return nil }
+            return Category(rawValue: raw)
+        }
+
+        static func remember(_ merchant: String, _ category: Category) {
+            let k = normalize(merchant)
+            guard k.count >= 2 else { return }
+            var m = all
+            m[k] = category.rawValue
+            if m.count > 300 {
+                m = Dictionary(uniqueKeysWithValues: Array(m).suffix(300))
+            }
+            UserDefaults.standard.set(m, forKey: key)
+        }
+
+        static func forget(_ merchant: String) {
+            var m = all
+            m.removeValue(forKey: normalize(merchant))
+            UserDefaults.standard.set(m, forKey: key)
+        }
+    }
+
     /// 关键字自动归类，命中越多越靠前
     static func guess(from text: String, merchant: String?) -> Category {
+        // 优先使用用户教过的分类
+        if let merchant, let learned = MerchantMemory.category(for: merchant) {
+            return learned
+        }
         let hay = (text + " " + (merchant ?? "")).lowercased()
         var best: (Category, Int) = (.other, 0)
 
@@ -119,7 +163,9 @@ enum Category: String, Codable, CaseIterable, Identifiable {
                       "餐厅", "奶茶", "喜茶", "蜜雪", "食堂", "外卖", "烧烤", "火锅", "面包", "便利店",
                       "7-11", "全家", "罗森", "沙县", "兰州", "早餐", "午餐", "晚餐", "超市", "超市便利"])
         score(.transport, ["滴滴", "高德", "曹操", "出租车", "打车", "地铁", "公交", "地铁公交",
-                           "加油", "中石化", "中石油", "停车", "高速", "etc", "铁路", "12306", "哈啰", "摩拜"])
+                           "加油", "中石化", "中石油", "停车", "高速", "etc", "铁路", "12306", "哈啰", "摩拜",
+                           "乘车", "先乘车", "网约车", "交通卡", "公共交通", "一卡通", "单车",
+                           "长途汽车", "客运", "机场", "车费", "过路费", "充电桩", "etc."])
         score(.shopping, ["淘宝", "天猫", "京东", "拼多多", "唯品会", "商场", "优衣库", "无印",
                           "服饰", "百货", "小米之家", "苏宁", "盒马", "山姆", "costco", "奥莱"])
         score(.entertainment, ["电影", "影城", "万达", "游戏", "steam", "票务", "大麦", "演唱会",
