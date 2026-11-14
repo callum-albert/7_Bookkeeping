@@ -11,15 +11,14 @@ struct ManualSetupView: View {
                 method(
                     badge: "A", tint: Theme.warm,
                     title: "侧边按钮（推荐）",
-                    subtitle: "按一下截图并直接识别，不经过相册",
-                    needSetup: "需要设置：一次性，2 个动作 · 不需要相册权限",
+                    subtitle: "按一下截屏，图片直接交给 App 识别",
+                    needSetup: "需要设置：一次性，3 个动作 · 不需要相册权限",
                     steps: [
                         "设置 → 操作按钮 → 选「快捷指令」",
-                        "新建快捷指令，依次添加：「截屏」",
-                        "「7记账 · 识别截图记账」；点「截图」参数，选择上一步截屏结果",
-                        "⚠️ 关闭「运行时显示」（开着会截到快捷指令界面）",
-                        "命名为「记一笔」保存，回到操作按钮选中它",
-                        "首次运行允许快捷指令调用 7记账；截屏结果不写入相册"
+                        "新建快捷指令：截屏 → Base64 编码 → 7记账 · 用编码截图记账",
+                        "把「编码截图」参数设为上一步的 Base64 编码结果",
+                        "关闭「运行时显示」，避免截到快捷指令界面",
+                        "命名为「记一笔」并绑定操作按钮；首次运行允许调用 7记账"
                     ]
                 )
                 method(
@@ -31,17 +30,6 @@ struct ManualSetupView: View {
                         "先按上面步骤 A 做好「记一笔」快捷指令",
                         "设置 → 辅助功能 → 触控 → 轻点背面 → 双击",
                         "选择「记一笔」"
-                    ]
-                )
-                method(
-                    badge: "备用", tint: Theme.mint,
-                    title: "无法选择截屏结果时",
-                    subtitle: "原图编码传入 App，同样按一下",
-                    needSetup: "3 个动作 · 仅编码图片，不提取文字",
-                    steps: [
-                        "截屏 → Base64 编码 → 7记账 · 用编码截图记账",
-                        "把「编码截图」参数设为上一步的 Base64 编码结果",
-                        "绑定操作按钮；App 还原原图后使用同一套 OCR 识别"
                     ]
                 )
                 method(
@@ -94,7 +82,7 @@ struct ManualSetupView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("默认不需要任何隐私权限")
                     .font(.system(size: 11, weight: .semibold))
-                Text("方案 A 把截屏动作的图片结果直接交给 App 识别，不访问相册或剪贴板。")
+                Text("截屏先编码为 Base64，App 还原原图后识别；不访问相册或剪贴板。")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -200,7 +188,7 @@ struct ManualSetupView: View {
     }
 
     private var note: some View {
-        Text("旧的相册或剪贴板快捷指令请改为上方图片直传步骤；若图片参数无法连接，请用 Base64 图片传递。识别结果有问题时，可在「我的」查看执行记录。")
+        Text("旧的相册、剪贴板或图片参数快捷指令请改为上方 Base64 图片传递。识别结果有问题时，可在「我的」查看执行记录。")
             .font(.system(size: 10))
             .foregroundStyle(.tertiary)
             .fixedSize(horizontal: false, vertical: true)

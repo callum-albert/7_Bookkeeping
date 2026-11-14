@@ -2,7 +2,7 @@
 """
 生成可直接导入的 .shortcut 文件（7记账）
 
-- 侧边按钮：截屏 → 识别截图记账
+- 侧边按钮：截屏 → Base64 编码 → 用编码截图记账
 - 账单文本： 接收输入 → 解析账单文本记账（给银行「信息」自动化用）
 
 格式依据：https://github.com/frontboat/shortcutkit/blob/main/docs/shortcut-file-format.md
@@ -86,17 +86,27 @@ def write(name, payload):
     print("生成:", path, os.path.getsize(path), "bytes")
 
 
-# ── 1. 侧边按钮：截屏 → 识别截图记账
+# ── 1. 侧边按钮：截屏 → Base64 编码 → 用编码截图记账
 screenshot_uid = str(uuid.uuid4()).upper()
+encoded_uid = str(uuid.uuid4()).upper()
 shot = {
     "WFWorkflowActionIdentifier": "is.workflow.actions.takescreenshot",
     "WFWorkflowActionParameters": {"UUID": screenshot_uid},
 }
-recognize = intent_action("RecordFromImageIntent", {
-    "image": attachment(screenshot_uid, "截屏"),
+encode = {
+    "WFWorkflowActionIdentifier": "is.workflow.actions.base64encode",
+    "WFWorkflowActionParameters": {
+        "UUID": encoded_uid,
+        "WFEncodeMode": "Encode",
+        "WFInput": attachment(screenshot_uid, "截屏"),
+    },
+}
+recognize = intent_action("RecordFromEncodedImageIntent", {
+    "encodedImage": attachment(encoded_uid, "Base64 编码"),
 }, str(uuid.uuid4()).upper())
 write("7记账-侧边按钮.shortcut",
-      base_dict([shot, recognize], "7记账-侧边按钮", glyph=59683))
+      base_dict([shot, encode, recognize], "7记账-侧边按钮", glyph=59683))
+
 
 # ── 2. 账单文本记账（接收输入，给银行短信自动化用）
 text = intent_action("RecordFromTextIntent", {

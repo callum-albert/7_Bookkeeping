@@ -43,7 +43,7 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(pendingReview.count) 笔待确认")
                         .font(.system(size: 13, weight: .semibold))
-                    Text("部分识别信息需要核对，点这里检查账单")
+                    Text("点开账目核对后，点「确认这笔」即可消除提醒")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -372,6 +372,11 @@ struct HomeView: View {
                         }
                         .buttonStyle(.plain)
                     }
+                    if pendingReview.isEmpty {
+                        Text("没有待确认的账目")
+                            .foregroundStyle(.secondary)
+                            .padding(24)
+                    }
                 }
                 .padding(18)
             }
@@ -643,6 +648,21 @@ struct EntryDetailView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 9)
+                }
+
+                if entry.needsReview {
+                    Button {
+                        entry.needsReview = false
+                        store.update(entry)
+                        dismiss()
+                    } label: {
+                        Label("确认这笔", systemImage: "checkmark.circle.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .glassEffect(.regular.tint(Theme.mint.opacity(0.2)).interactive(), in: .rect(cornerRadius: 18))
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 Button {

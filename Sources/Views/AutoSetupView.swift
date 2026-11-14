@@ -74,11 +74,11 @@ struct AutoSetupView: View {
                 Text("银行短信自动记录收入与支出")
                     .font(.system(size: 13, weight: .semibold))
             }
-            Text("自动记账只保留银行短信。开通消费及入账提醒，配置一次快捷指令；微信零钱、支付宝余额等可用侧边按钮两步快捷指令，把截屏结果直接传给 App 识别，无需相册。两种方式都能识别银行和卡尾号，并自动添加新卡。")
+            Text("自动记账只保留银行短信。开通消费及入账提醒，配置一次快捷指令；微信零钱、支付宝余额等可用侧边按钮三步 Base64 快捷指令，把截屏图片传给 App 识别，无需相册。两种方式都能识别银行和卡尾号，并自动添加新卡。")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("动作在动作库里搜「7记账」即可看到：解析账单文本记账 / 用最新截图记账 / 识别截图记账。")
+            Text("动作在动作库里搜「7记账」即可看到：解析账单文本记账 / 用编码截图记账。")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

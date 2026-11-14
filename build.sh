@@ -12,7 +12,7 @@ DISPLAY_NAME="7记账"
 BUNDLE_ID="com.seven.bookkeeping"
 WIDGET_ID="com.seven.bookkeeping.widgets"
 DEPLOY="26.0"
-VERSION="1.4.11"
+VERSION="1.4.12"
 
 SWIFT_FLAGS=(-target arm64-apple-ios$DEPLOY -sdk "$SDK" -swift-version 5 -O -whole-module-optimization
              -Xfrontend -disable-availability-checking

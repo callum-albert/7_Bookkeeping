@@ -35,16 +35,6 @@ INTENTS = [
                          "title": "编码截图", "description": "传入 Base64 编码动作的结果"}],
     },
     {
-        "identifier": "RecordFromImageIntent",
-        "title": "识别截图记账",
-        "description": "从传入的账单截图识别金额、商户、商品及支付方式",
-        "parameters": [
-            {"name": "image", "intents_type": 12, "optional": False,
-             "title": "截图", "description": "传入截屏动作的结果",
-             "type_specific_metadata": file_supported_types(["public.image"])}
-        ],
-    },
-    {
         "identifier": "RecordFromClipboardImageIntent",
         "title": "识别剪贴板图片记账",
         "description": "读取剪贴板中的截图并识别记账，不访问相册",

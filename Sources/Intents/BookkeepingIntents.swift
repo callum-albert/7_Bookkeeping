@@ -50,42 +50,6 @@ struct RecordFromTextIntent: AppIntent {
     }
 }
 
-// MARK: - 识别截图记账（操作按钮 / 轻点背面 / 锁屏小组件）
-struct RecordFromImageIntent: AppIntent {
-    static var title: LocalizedStringResource = "识别截图记账"
-    static var description = IntentDescription("从微信/支付宝消费、收款、红包或退款截图识别金额和收支类型，在后台记账")
-    static var openAppWhenRun: Bool = false
-
-    @Parameter(title: "截图", description: "传入「截屏」动作的结果", supportedContentTypes: [.image])
-    var image: IntentFile
-
-    @MainActor
-    func perform() async throws -> some IntentResult {
-        let data = image.data
-        IntentLog.record("直接接收截屏：\(data.count) 字节")
-        guard !data.isEmpty, let ui = UIImage(data: data) else {
-            IntentLog.record("截屏参数为空或图片无法解码；检查是否选中了上一步截屏结果")
-            throw NSError(domain: "SevenBookkeeping", code: 1,
-                          userInfo: [NSLocalizedDescriptionKey: "没有收到截屏图片。请在快捷指令的「识别截图记账」中把「截图」参数设为上一步的截屏结果。"])
-        }
-
-        let entries = await AutoBookkeeper.shared.ingestImage(ui, source: "快捷指令·截图")
-
-        guard !entries.isEmpty else {
-            if !BillParser.parse(AutoBookkeeper.shared.lastOCRText).isEmpty {
-                IntentLog.record("截屏已识别，账单重复或属内部转账")
-                return .result()
-            }
-            IntentLog.record("截屏 OCR 未识别到可靠账单")
-            throw NSError(domain: "SevenBookkeeping", code: 2,
-                          userInfo: [NSLocalizedDescriptionKey: "未识别到可靠的金额，请截取完整的付款、收款、红包或退款详情页。"])
-        }
-        let total = entries.reduce(0) { $0 + $1.amountCents }
-        IntentLog.record("截图记账：\(entries.count) 笔，\(total.moneyText)")
-        return .result()
-    }
-}
-
 /// 当快捷指令编辑器无法把「截屏」结果连接到 IntentFile 时，用字符串传原始图片字节。
 /// 这一步只编码图片，不在快捷指令中做 OCR，也不写入相册。
 struct RecordFromEncodedImageIntent: AppIntent {
@@ -288,9 +252,9 @@ struct CategoryQuery: EntityQuery {
 struct BookkeepingShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
-            intent: RecordFromImageIntent(),
-            phrases: ["用 \(.applicationName) 识别截图记账", "让 \(.applicationName) 记这笔"],
-            shortTitle: "识别截图记账",
+            intent: RecordFromEncodedImageIntent(),
+            phrases: ["用 \(.applicationName) 识别编码截图", "让 \(.applicationName) 记这笔"],
+            shortTitle: "用编码截图记账",
             systemImageName: "text.viewfinder"
         )
         AppShortcut(

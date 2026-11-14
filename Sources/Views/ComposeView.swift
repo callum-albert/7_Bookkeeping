@@ -76,24 +76,23 @@ struct ComposeView: View {
                         Text("保存这一笔")
                             .font(.system(size: 16, weight: .semibold))
                     }
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 15)
-                    .background(.ultraThinMaterial, in: .rect(cornerRadius: 22))
-                    .glassEffect(.regular.tint(Theme.brand.opacity(0.82)).interactive(),
+                    .glassEffect(.regular.tint(.white.opacity(0.72)).interactive(),
                                  in: .rect(cornerRadius: 22))
                     .overlay {
                         RoundedRectangle(cornerRadius: 22, style: .continuous)
                             .stroke(
-                                LinearGradient(colors: [.white.opacity(0.55), .white.opacity(0.08)],
+                                LinearGradient(colors: [.white.opacity(0.95), .white.opacity(0.18)],
                                                startPoint: .top, endPoint: .bottom),
                                 lineWidth: 0.9
                             )
                     }
-                    .shadow(color: Theme.brand.opacity(0.35), radius: 16, y: 8)
+                    .shadow(color: .black.opacity(0.12), radius: 16, y: 8)
                 }
                 .buttonStyle(.plain)
-                .opacity(amountCents > 0 ? 1 : 0.62)
+                .opacity(amountCents > 0 ? 1 : 0.72)
                 .animation(.easeOut(duration: 0.2), value: amountCents > 0)
                 .disabled(amountCents <= 0)
                 .padding(.horizontal, 18)

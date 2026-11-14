@@ -90,7 +90,7 @@ struct SettingsView: View {
                 symbol: "hand.tap.fill",
                 tint: Theme.brand,
                 title: "手动记账",
-                detail: "侧边按钮 / 截图 / 粘贴",
+                detail: "侧边按钮 Base64 图片 / 粘贴",
                 badge: "需设置一次",
                 destination: ManualSetupView()
             )
