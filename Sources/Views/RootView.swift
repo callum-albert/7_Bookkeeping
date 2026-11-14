@@ -2,6 +2,16 @@ import SwiftUI
 import Photos
 
 struct RootView: View {
+    /// 相册读取权限只在首次启动时请求一次，避免每次切回「我的」都弹系统框
+    private static var didRequestPhotoAccess = false
+
+    static func requestPhotoAccessOnce() async {
+        guard !didRequestPhotoAccess else { return }
+        didRequestPhotoAccess = true
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard status == .notDetermined else { return }
+        _ = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+    }
     private var _store = State(wrappedValue: LedgerStore.shared)
     private var store: LedgerStore { get { _store.wrappedValue } nonmutating set { _store.wrappedValue = newValue } }
     private var _bookkeeper = State(wrappedValue: AutoBookkeeper.shared)
@@ -33,8 +43,7 @@ struct RootView: View {
         }
         .task {
             await NotificationService.shared.requestIfNeeded()
-            // 「用最新截图记账」需要读取相册最新一张图（仅读取，不上传）
-            _ = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+            await Self.requestPhotoAccessOnce()
         }
         .sheet(isPresented: _showCompose.projectedValue) {
             ComposeView()

@@ -42,6 +42,7 @@ struct SettingsView: View {
             .padding(.top, 6)
         }
         .scrollIndicators(.hidden)
+        .background(AppBackground())
         .navigationTitle("我的")
         .navigationBarTitleDisplayMode(.inline)
         .alert("清空所有账目？", isPresented: _showClearAlert.projectedValue) {
