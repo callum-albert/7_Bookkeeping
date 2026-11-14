@@ -16,18 +16,11 @@ struct RecordFromTextIntent: AppIntent {
     }
 
     @MainActor
-    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
+    func perform() async throws -> some IntentResult & ReturnsValue<String> {
+        // 不返回 dialog：避免快捷指令弹出「完成」对话框，结果通过灵动岛/通知呈现
         let entries = AutoBookkeeper.shared.ingest(text, source: "快捷指令", trigger: .manual)
-        guard !entries.isEmpty else {
-            return .result(value: "0", dialog: "没有识别到账单信息")
-        }
         let total = entries.reduce(0) { $0 + $1.amountCents }
-        let la = LiveActivityController.shared
-        let island = la.lastResult != nil && la.lastError == nil
-            ? ""
-            : "（灵动岛未显示：\(la.lastError ?? "未知原因")）"
-        return .result(value: total.moneyText,
-                       dialog: "已记 \(entries.count) 笔，共 \(total.moneyText)\(island)")
+        return .result(value: entries.isEmpty ? "0" : total.moneyText)
     }
 }
 
@@ -58,7 +51,7 @@ struct RecordFromImageIntent: AppIntent {
     var image: IntentFile
 
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    func perform() async throws -> some IntentResult {
         guard let data = image.data as Data?, let ui = UIImage(data: data) else {
             return .result(dialog: "图片读取失败，请重新截屏")
         }

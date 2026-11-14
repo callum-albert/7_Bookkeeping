@@ -71,11 +71,15 @@ final class AutoBookkeeper {
             }
 
             let balance = LiveActivityController.balanceInfo(for: first)
-            LiveActivityController.shared.start(for: first, todayTotal: todayTotal(), auto: true)
-            // 所有场景都推一条锁屏通知（灵动岛失败时也能看到结果）
-            NotificationService.shared.notify(entry: first,
-                                             balanceLabel: balance.label,
-                                             balanceText: balance.text)
+            let islandOK = LiveActivityController.shared.start(for: first,
+                                                              todayTotal: todayTotal(),
+                                                              auto: true)
+            // 灵动岛成功就够；失败或后台才用通知兜底，避免三处重复提示
+            if !islandOK, UIApplication.shared.applicationState != .active {
+                NotificationService.shared.notify(entry: first,
+                                                 balanceLabel: balance.label,
+                                                 balanceText: balance.text)
+            }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
             return all
         }
@@ -136,8 +140,10 @@ final class AutoBookkeeper {
         LedgerStore.shared.add(e)
         showToast("已记录 \(e.amountText)", e.category.title, .success)
         let balance = LiveActivityController.balanceInfo(for: e)
-        LiveActivityController.shared.start(for: e, todayTotal: todayTotal(), auto: true)
-        NotificationService.shared.notify(entry: e, balanceLabel: balance.label, balanceText: balance.text)
+        let islandOK = LiveActivityController.shared.start(for: e, todayTotal: todayTotal(), auto: true)
+        if !islandOK, UIApplication.shared.applicationState != .active {
+            NotificationService.shared.notify(entry: e, balanceLabel: balance.label, balanceText: balance.text)
+        }
     }
 
     func todayTotal() -> Int {
