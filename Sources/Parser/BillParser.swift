@@ -34,9 +34,131 @@ enum BillParser {
         var hasPaidTime: Bool = false
     }
 
+    // MARK: - 模板化解析（微信 / 支付宝账单详情页）
+    /// 账单详情页有一块固定结构：
+    ///   当前状态 / 支付时间 / 商品 / 商户全称 / 收单机构 / 支付方式 / 交易单号 / 商户单号
+    /// 只认这块里的标准字段，其它内容（交易服务、对订单有疑惑…）一律忽略。
+    private static let detailLabels = [
+        "当前状态", "支付时间", "交易时间", "付款时间", "消费时间",
+        "商品", "商户全称", "商户名称", "收单机构", "支付方式", "付款方式",
+        "交易单号", "商户单号", "订单号", "商家名称", "收款方"
+    ]
+
+    private static func isDetailLabelLine(_ line: String) -> String? {
+        detailLabels.first { label in
+            guard line.hasPrefix(label) else { return false }
+            let rest = String(line.dropFirst(label.count))
+            // 后面必须是空白/冒号，或者是真正的值（不能是「单号」这种同词根）
+            if rest.isEmpty { return true }
+            let t = rest.trimmingCharacters(in: .whitespaces)
+            if t.isEmpty { return true }
+            if t.hasPrefix(":") || t.hasPrefix("：") { return true }
+            // 「商户单号」会被 "商户" 前缀误命中，这里排除
+            if ["单号", "编号", "号："].contains(where: { t.hasPrefix($0) }) { return false }
+            return true
+        }
+    }
+
+    private static func valueAfterLabel(_ line: String, _ label: String) -> String {
+        var rest = String(line.dropFirst(label.count))
+        rest = rest.trimmingCharacters(in: CharacterSet(charactersIn: " :：\t"))
+        return rest
+    }
+
+    static func parseDetailTemplate(_ text: String, now: Date = Date()) -> Parsed? {
+        let lines = text.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+
+        // 必须同时出现「当前状态」和至少两个关键字段，才认为是账单详情页
+        guard lines.contains(where: { $0.hasPrefix("当前状态") }) else { return nil }
+        let keyHits = ["支付时间", "交易时间", "商户全称", "商品", "支付方式"]
+            .filter { k in lines.contains { $0.hasPrefix(k) } }.count
+        guard keyHits >= 2 else { return nil }
+
+        // 只截取「当前状态」到「商户单号 / 账单服务 / 交易服务」之间的块
+        var block: [String] = []
+        var started = false
+        for line in lines {
+            if line.hasPrefix("当前状态") { started = true }
+            if !started { continue }
+            if line.hasPrefix("账单服务") || line.hasPrefix("交易服务") { break }
+            block.append(line)
+        }
+        guard !block.isEmpty else { return nil }
+
+        var fields: [String: String] = [:]
+        for (i, line) in block.enumerated() {
+            guard let label = isDetailLabelLine(line) else { continue }
+            let inline = valueAfterLabel(line, label)
+            if !inline.isEmpty {
+                fields[label] = inline
+                continue
+            }
+            // 值可能在相邻行（OCR 常把标签和值拆开，甚至值在上方）
+            for j in [i + 1, i - 1] where j >= 0 && j < block.count {
+                let cand = block[j]
+                if isDetailLabelLine(cand) != nil { continue }
+                if cand.isEmpty || cand.hasPrefix("¥") { continue }
+                fields[label] = cand
+                break
+            }
+        }
+
+        // 金额：优先账单页顶部的「-27.60」「¥27.60」，最后才用通用规则
+        func toCents(_ t: String) -> Int? {
+            let d = t.replacingOccurrences(of: ",", with: "")
+            guard d.count <= 9, let v = Double(d), v > 0, v < 100_000_000 else { return nil }
+            return Int((v * 100).rounded())
+        }
+        var cents: Int? = nil
+        if let neg = firstMatch(#"[-−–]\s*([0-9][0-9,]*\.[0-9]{1,2})"#, in: text, group: 1) {
+            cents = toCents(neg)
+        }
+        if cents == nil, let yen = firstMatch(#"[¥￥]\s*([0-9][0-9,]*\.[0-9]{1,2})"#, in: text, group: 1) {
+            cents = toCents(yen)
+        }
+        if cents == nil { cents = extractAmount(text) }
+        guard let amount = cents, amount > 0 else { return nil }
+
+        let source = detectSource(text) ?? (text.contains("支付宝") ? .alipay : .wechat)
+        let merchant = fields["商户全称"] ?? fields["商户名称"] ?? fields["商家名称"]
+            ?? fields["收款方"] ?? fields["商品"] ?? ""
+        let paymentText = fields["支付方式"] ?? fields["付款方式"] ?? ""
+        let timeText = fields["支付时间"] ?? fields["交易时间"] ?? fields["付款时间"] ?? fields["消费时间"] ?? ""
+
+        let paidDate = extractDate(timeText.isEmpty ? text : timeText, now: now)
+            ?? extractPaidTime(text)
+            ?? extractFullDateTime(text)
+
+        let channel = extractChannel(paymentText.isEmpty ? text : paymentText, source: source)
+        let account = extractAccount(paymentText.isEmpty ? text : paymentText, source: source)
+        let flow = classify(block.joined(separator: " "))
+
+        return Parsed(
+            amountCents: amount,
+            source: source,
+            category: merchant.isEmpty ? .other : Category.guess(from: merchant + " " + (fields["商品"] ?? ""), merchant: merchant),
+            merchant: merchant,
+            account: account,
+            date: paidDate ?? now,
+            raw: block.joined(separator: "\n"),
+            flow: flow,
+            needsReview: false,
+            channel: channel,
+            balanceAfter: extractBalance(text),
+            hasPaidTime: paidDate != nil
+        )
+    }
+
     // MARK: - 主入口
     static func parse(_ text: String, now: Date = Date()) -> [Parsed] {
         let cleaned = normalize(text)
+
+        // ① 账单详情页 → 走模板解析（最可靠）
+        if let t = parseDetailTemplate(cleaned, now: now), t.flow == .expense {
+            return [t]
+        }
         guard !cleaned.isEmpty else { return [] }
 
         // 整体流向判定（决定这笔到底记不记）
@@ -216,7 +338,8 @@ enum BillParser {
         for p in amountPatterns {
             if let m = firstMatch(p, in: s, group: 1) {
                 let digits = m.replacingOccurrences(of: ",", with: "")
-                if let d = Double(digits), d > 0 {
+                // 金额上限 1 亿元：更长的数字是单号 / 卡号，直接忽略（也避免 Int 溢出崩溃）
+                if digits.count <= 9, let d = Double(digits), d > 0, d < 100_000_000 {
                     return Int((d * 100).rounded())
                 }
             }

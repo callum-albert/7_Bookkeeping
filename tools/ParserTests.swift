@@ -427,6 +427,38 @@ check("㊱ 商户记忆生效",
       Category.guess(from: "随便什么文本", merchant: "广州启安科技有限公司") == .transport,
       "\(Category.guess(from: "x", merchant: "广州启安科技有限公司"))")
 
+print("\n── 20. 支付宝/微信账单详情页模板 ──")
+let alipayDetail = """
+14:30
+交易详情
+门店
+-27.60
+小女当家
+当前状态    支付成功
+支付时间    2026年11月09日 11:47:09
+商品        【POS】_上海互联宝地店_567850
+商户全称    当家食力鲜厨（上海）餐饮有限公司
+收单机构    财付通支付科技有限公司
+支付方式    招商银行储蓄卡(4926)
+交易单号    4200003227202611094941731436
+商户单号    可在支持的商户扫码退款
+T1326517543793922050
+交易服务
+对订单有疑惑
+发起群收款
+在此商户的交易
+申请电子凭证
+"""
+let ad = BillParser.parse(alipayDetail).first
+check("㊲ 模板：商户取商户全称", ad?.merchant == "当家食力鲜厨(上海)餐饮有限公司", ad?.merchant ?? "nil")
+check("㊳ 模板：支付时间正确",
+      Calendar.current.component(.day, from: ad?.date ?? Date()) == 9, "\(String(describing: ad?.date))")
+check("㊴ 模板：支付时间不被标成记账时间", ad?.hasPaidTime == true, "\(String(describing: ad?.hasPaidTime))")
+check("㊵ 模板：支付方式尾号", ad?.account.contains("4926") == true, ad?.account ?? "nil")
+check("㊶ 模板：金额", ad?.amountCents == 2760, "\(String(describing: ad?.amountCents))")
+check("㊷ 模板：分类餐饮", ad?.category == .food, "\(String(describing: ad?.category))")
+check("㊸ 模板：来源不是「交易」", ad?.merchant != "交易", ad?.merchant ?? "nil")
+
 print("\n─────────────────────────────")
 print("通过 \(pass) / \(pass + fail)")
 exit(fail == 0 ? 0 : 1)
