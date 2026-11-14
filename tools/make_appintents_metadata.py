@@ -33,6 +33,8 @@ INTENTS = [
                 "name": "text",
                 "primitive": 0,      # 0 = String
                 "optional": False,
+                "title": "账单文本",
+                "description": "要解析的账单原文，例如：微信支付 你已成功付款 25.00元",
             }
         ],
     },
@@ -47,7 +49,12 @@ def param_entry(p):
         "isInput": False,
         "isOptional": p.get("optional", True),
         "name": p["name"],
+        "parameterDescription": {
+            "alternatives": [],
+            "key": p.get("description", p["name"]),
+        },
         "resolvableInputTypes": [],
+        "title": {"alternatives": [], "key": p.get("title", p["name"])},
         "typeSpecificMetadata": [],
         "valueType": {"primitive": {"wrapper": {"typeIdentifier": p["primitive"]}}},
     }

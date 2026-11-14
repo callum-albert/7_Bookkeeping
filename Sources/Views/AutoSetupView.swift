@@ -17,6 +17,7 @@ struct AutoSetupView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
+                openShortcutsButton
                 intro
                 channel(
                     badge: "A", badgeTint: Theme.mint,
@@ -69,6 +70,28 @@ struct AutoSetupView: View {
         .background(AppBackground())
         .navigationTitle("自动记账")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var openShortcutsButton: some View {
+        Button {
+            if let url = URL(string: "shortcuts://") {
+                UIApplication.shared.open(url)
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.up.forward.app.fill")
+                    .font(.system(size: 13))
+                Text("打开「快捷指令」")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Text("先执行再照着做").font(.system(size: 10)).foregroundStyle(.secondary)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold)).opacity(0.35)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .glassEffect(.regular.tint(Theme.brand.opacity(0.16)).interactive(), in: .rect(cornerRadius: 16))
+        }
+        .buttonStyle(.plain)
     }
 
     private var intro: some View {
