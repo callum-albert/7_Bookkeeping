@@ -147,6 +147,9 @@ PLIST
 echo "==> 清除扩展属性"
 xattr -cr "$BUILD/Payload" 2>/dev/null || true
 
+echo "==> 生成 App Intents 元数据（快捷指令动作库索引）"
+python3 "$ROOT/tools/make_appintents_metadata.py" "$APP"
+
 echo "==> 写入本地化名称（桌面显示中文）"
 mkdir -p "$APP/zh-Hans.lproj" "$APP/zh-Hant.lproj" "$APP/en.lproj"
 cat > "$APP/zh-Hans.lproj/InfoPlist.strings" <<'LOC'
