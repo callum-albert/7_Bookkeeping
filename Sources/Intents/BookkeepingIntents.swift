@@ -82,6 +82,26 @@ struct RecordFromImageIntent: AppIntent {
     }
 }
 
+// MARK: - 识别剪贴板里的图片（不需要相册权限）
+struct RecordFromClipboardImageIntent: AppIntent {
+    static var title: LocalizedStringResource = "识别剪贴板图片记账"
+    static var description = IntentDescription("读取剪贴板中的截图并识别记账，不访问相册")
+    static var openAppWhenRun: Bool = false
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        IntentLog.record("剪贴板图片：开始读取")
+        guard let image = UIPasteboard.general.image else {
+            IntentLog.record("剪贴板图片：剪贴板里没有图片")
+            return .result()
+        }
+        IntentLog.record("剪贴板图片：\(Int(image.size.width))×\(Int(image.size.height))，OCR 中")
+        let entries = await AutoBookkeeper.shared.ingestImage(image, source: "剪贴板图片")
+        IntentLog.record(entries.isEmpty ? "剪贴板图片：未识别到账单" : "剪贴板图片：成功 \(entries.count) 笔")
+        return .result()
+    }
+}
+
 // MARK: - 用相册最新截图记账（绕过快捷指令的截屏动作）
 struct RecordFromLatestScreenshotIntent: AppIntent {
     static var title: LocalizedStringResource = "用最新截图记账"
@@ -102,6 +122,13 @@ struct RecordFromLatestScreenshotIntent: AppIntent {
         IntentLog.record(entries.isEmpty
             ? "最新截图：OCR 后未识别到账单"
             : "最新截图：记账成功 \(entries.reduce(0) { $0 + $1.amountCents }.moneyText)")
+
+        // 记账成功后删除这张截图（可在设置里关闭）
+        if !entries.isEmpty,
+           UserDefaults.standard.object(forKey: "deleteScreenshotAfterUse") as? Bool ?? true,
+           let asset = shot.asset {
+            await ScreenshotReader.delete(asset)
+        }
         return .result()
     }
 }
@@ -111,10 +138,18 @@ enum ScreenshotReader {
     struct Shot {
         var image: UIImage
         var createdAt: Date?
+        var asset: PHAsset?
     }
 
     static func latest() async -> UIImage? {
         (await latestWithMeta())?.image
+    }
+
+    /// 删除相册里的一张图（首次会弹系统确认）
+    static func delete(_ asset: PHAsset) async {
+        try? await PHPhotoLibrary.shared().performChanges {
+            PHAssetChangeRequest.deleteAssets([asset] as NSArray)
+        }
     }
 
     static func latestWithMeta() async -> Shot? {
@@ -138,7 +173,7 @@ enum ScreenshotReader {
                 guard !resumed else { return }
                 resumed = true
                 if let data, let img = UIImage(data: data) {
-                    cont.resume(returning: Shot(image: img, createdAt: created))
+                    cont.resume(returning: Shot(image: img, createdAt: created, asset: asset))
                 } else {
                     cont.resume(returning: nil)
                 }

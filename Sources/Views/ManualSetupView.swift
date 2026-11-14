@@ -82,7 +82,7 @@ struct ManualSetupView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("默认不需要任何隐私权限")
                     .font(.system(size: 11, weight: .semibold))
-                Text("方案 A 在你的快捷指令里完成识别，只把识别出的文字交给 App，不读取相册。")
+                Text("方案 A 把截图经剪贴板交给 App 自己识别，不访问相册、不需要任何权限。")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
