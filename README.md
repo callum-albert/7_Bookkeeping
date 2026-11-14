@@ -32,7 +32,7 @@
 
 ## 安装与 SideStore
 
-从 [Releases](https://github.com/callum-albert/7_Bookkeeping/releases) 的 **Assets** 下载 `7jizhang.ipa`，不要导入 Source code.zip。主 App 与灵动岛扩展都需要重新签名；发布包为 ad-hoc 构建，安装前仍需自己的开发者签名或支持的侧载工具。
+从 [Releases](https://github.com/callum-albert/7_Bookkeeping/releases) 的 **Assets** 下载 `7jizhang-<版本号>.ipa`（例如 `7jizhang-1.4.6.ipa`），不要导入 Source code.zip。主 App 与灵动岛扩展都需要重新签名；发布包为 ad-hoc 构建，安装前仍需自己的开发者签名或支持的侧载工具。
 
 新版用最基础的 ZIP Stored（不压缩）格式打包，避免依赖侧载工具的 deflate 解码路径。构建时逐项检查 ZIP 本地头、中央目录、CRC、可执行文件和 Bundle Identifier，并对主程序和扩展做严格签名校验。包较旧版更大属正常现象。
 

@@ -12,6 +12,7 @@ DISPLAY_NAME="7记账"
 BUNDLE_ID="com.seven.bookkeeping"
 WIDGET_ID="com.seven.bookkeeping.widgets"
 DEPLOY="26.0"
+VERSION="1.4.6"
 
 SWIFT_FLAGS=(-target arm64-apple-ios$DEPLOY -sdk "$SDK" -swift-version 5 -O -whole-module-optimization
              -Xfrontend -disable-availability-checking
@@ -65,7 +66,7 @@ cat > "$APP/Info.plist" <<PLIST
   <key>CFBundleName</key><string>$APP_NAME</string>
   <key>CFBundleLocalizations</key><array><string>zh-Hans</string><string>zh-Hant</string><string>en</string></array>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.4.6</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>2</string>
   <key>LSRequiresIPhoneOS</key><true/>
   <key>MinimumOSVersion</key><string>$DEPLOY</string>
@@ -128,7 +129,7 @@ cat > "$APP/PlugIns/SevenWidgets.appex/Info.plist" <<PLIST
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>SevenWidgets</string>
   <key>CFBundlePackageType</key><string>XPC!</string>
-  <key>CFBundleShortVersionString</key><string>1.4.6</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>2</string>
   <key>MinimumOSVersion</key><string>$DEPLOY</string>
   <key>LSMinimumSystemVersion</key><string>$DEPLOY</string>
@@ -187,11 +188,13 @@ fi
 
 echo "==> 打包 ipa"
 cd "$BUILD"
-python3 "$ROOT/tools/package_ipa.py" "$BUILD/Payload" "$BUILD/7jizhang.ipa"
-python3 "$ROOT/tools/verify_ipa.py" "$BUILD/7jizhang.ipa"
+python3 "$ROOT/tools/package_ipa.py" "$BUILD/Payload" "$BUILD/7jizhang-$VERSION.ipa"
+python3 "$ROOT/tools/verify_ipa.py" "$BUILD/7jizhang-$VERSION.ipa"
 cd "$ROOT"
 mkdir -p "$ROOT/build"
-cp "$BUILD/7jizhang.ipa" "$ROOT/build/7jizhang.ipa"
-cp "$BUILD/7jizhang.ipa" "$ROOT/7记账.ipa"
+mkdir -p "$ROOT/build"
+cp "$BUILD/7jizhang-$VERSION.ipa" "$ROOT/build/7jizhang-$VERSION.ipa"
+cp "$BUILD/7jizhang-$VERSION.ipa" "$ROOT/7记账-$VERSION.ipa"
 echo ""
-echo "✅ 完成: $ROOT/7记账.ipa  ($(du -h "$ROOT/7记账.ipa" | cut -f1))"
+echo "✅ 完成: $ROOT/7记账-$VERSION.ipa  ($(du -h "$ROOT/7记账-$VERSION.ipa" | cut -f1))"
+echo "   发布用: build/7jizhang-$VERSION.ipa"
