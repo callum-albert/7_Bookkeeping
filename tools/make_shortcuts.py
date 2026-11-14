@@ -3,8 +3,7 @@
 生成可直接导入的 .shortcut 文件（7记账）
 
 - 侧边按钮：截屏 → 识别截图记账
-- 剪贴板：  从剪贴板自动记账
-- 账单文本： 接收输入 → 解析账单文本记账（给「信息」「电子邮件」自动化用）
+- 账单文本： 接收输入 → 解析账单文本记账（给银行「信息」自动化用）
 
 格式依据：https://github.com/frontboat/shortcutkit/blob/main/docs/shortcut-file-format.md
 App Intent 动作的 identifier 为 <bundleID>.<IntentTypeName>，参数键为 Swift 参数名。
@@ -87,11 +86,6 @@ def write(name, payload):
     print("生成:", path, os.path.getsize(path), "bytes")
 
 
-recent = intent_action("RecordRecentScreenshotIntent", {}, str(uuid.uuid4()).upper())
-write("7记账-新截图自动记账.shortcut",
-      base_dict([recent], "7记账-新截图自动记账", glyph=59683))
-
-
 # ── 1. 侧边按钮：截屏 → 识别截图记账
 screenshot_uid = str(uuid.uuid4()).upper()
 shot = {
@@ -104,12 +98,7 @@ recognize = intent_action("RecordFromImageIntent", {
 write("7记账-侧边按钮.shortcut",
       base_dict([shot, recognize], "7记账-侧边按钮", glyph=59683))
 
-# ── 2. 剪贴板记账（无参数）
-clip = intent_action("ParseClipboardIntent", {}, str(uuid.uuid4()).upper())
-write("7记账-剪贴板记账.shortcut",
-      base_dict([clip], "7记账-剪贴板记账", glyph=59510))
-
-# ── 3. 账单文本记账（接收输入，给信息/邮件自动化用）
+# ── 2. 账单文本记账（接收输入，给银行短信自动化用）
 text = intent_action("RecordFromTextIntent", {
     "text": shortcut_input(),
 }, str(uuid.uuid4()).upper())

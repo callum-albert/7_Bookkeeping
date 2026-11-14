@@ -119,6 +119,9 @@ struct BalanceManageView: View {
                     .monospacedDigit()
             }
 
+            Text("银行短信和手动按键截图都会识别银行及尾号；发现新卡自动添加。只显示尾号的账单无法恢复完整卡号。")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             if accounts.cards.isEmpty {
                 Text("还没有银行卡。记账时识别到尾号会自动添加，也可以在这里手动加。")
                     .font(.system(size: 11))

@@ -28,8 +28,7 @@ ATTR_FILE="$ROOT/Sources/LiveActivity/BookkeepingAttributes.swift"
 
 echo "==> 编译主程序"
 # shellcheck disable=SC2086
-swiftc "${SWIFT_FLAGS[@]}" $SOURCES_APP -o "$APP/$APP_NAME" \
-  -Xlinker -weak_framework -Xlinker ScreenCaptureKit 2>&1 | sed 's/^/   /'
+swiftc "${SWIFT_FLAGS[@]}" $SOURCES_APP -o "$APP/$APP_NAME" 2>&1 | sed 's/^/   /'
 echo "   ok: $(du -h "$APP/$APP_NAME" | cut -f1)"
 
 echo "==> 编译灵动岛扩展"
@@ -66,7 +65,7 @@ cat > "$APP/Info.plist" <<PLIST
   <key>CFBundleName</key><string>$APP_NAME</string>
   <key>CFBundleLocalizations</key><array><string>zh-Hans</string><string>zh-Hant</string><string>en</string></array>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.3.0</string>
+  <key>CFBundleShortVersionString</key><string>1.4.0</string>
   <key>CFBundleVersion</key><string>2</string>
   <key>LSRequiresIPhoneOS</key><true/>
   <key>MinimumOSVersion</key><string>$DEPLOY</string>
@@ -88,11 +87,9 @@ cat > "$APP/Info.plist" <<PLIST
   <key>UIApplicationSceneManifest</key>
   <dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
   <key>NSSupportsLiveActivities</key><true/>
-  <key>UIBackgroundModes</key><array><string>screen-capture</string></array>
   <key>NSSupportsLiveActivitiesFrequentUpdates</key><true/>
   <key>ITSAppUsesNonExemptEncryption</key><false/>
   <key>NSPhotoLibraryUsageDescription</key><string>选择账单截图，自动识别金额与商户</string>
-  <key>NSScreenCaptureUsageDescription</key><string>在你主动开启的识屏会话中，本机识别微信和支付宝成功支付页并记账；不保存视频或上传画面。</string>
   <key>UIStatusBarStyle</key><string>UIStatusBarStyleDefault</string>
   <key>CFBundleIcons</key>
   <dict>
@@ -131,7 +128,7 @@ cat > "$APP/PlugIns/SevenWidgets.appex/Info.plist" <<PLIST
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>SevenWidgets</string>
   <key>CFBundlePackageType</key><string>XPC!</string>
-  <key>CFBundleShortVersionString</key><string>1.3.0</string>
+  <key>CFBundleShortVersionString</key><string>1.4.0</string>
   <key>CFBundleVersion</key><string>2</string>
   <key>MinimumOSVersion</key><string>$DEPLOY</string>
   <key>LSMinimumSystemVersion</key><string>$DEPLOY</string>
@@ -190,8 +187,8 @@ fi
 
 echo "==> 打包 ipa"
 cd "$BUILD"
-rm -f 7jizhang.ipa
-zip -qrX 7jizhang.ipa Payload
+python3 "$ROOT/tools/package_ipa.py" "$BUILD/Payload" "$BUILD/7jizhang.ipa"
+python3 "$ROOT/tools/verify_ipa.py" "$BUILD/7jizhang.ipa"
 cd "$ROOT"
 mkdir -p "$ROOT/build"
 cp "$BUILD/7jizhang.ipa" "$ROOT/build/7jizhang.ipa"

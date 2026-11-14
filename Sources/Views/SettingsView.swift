@@ -27,6 +27,11 @@ struct SettingsView: View {
         ScrollView {
             VStack(spacing: 16) {
                 methodsCard
+                NavigationLink { CategoryManageView() } label: {
+                    Label("自定义分类", systemImage: "tag.fill")
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(16)
+                        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 20))
+                }.buttonStyle(.plain)
                 balanceCard
                 dataCard
                 islandCard
@@ -60,7 +65,7 @@ struct SettingsView: View {
                 symbol: "bolt.fill",
                 tint: Theme.mint,
                 title: "自动记账",
-                detail: "授权识屏 / 银行短信 / 截图辅助",
+                detail: "银行短信 · 自动记录收入与支出",
                 badge: "需设置一次",
                 destination: AutoSetupView()
             )
@@ -399,14 +404,14 @@ struct SettingsView: View {
     }
 
     private func exportCSV() {
-        var csv = "日期,金额,分类,商户,来源,支付渠道,备注\n"
+        var csv = "日期,金额,收支类型,分类,商户,来源,支付渠道,备注\n"
+        func cell(_ value: String) -> String { "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd HH:mm"
         for e in store.entries.sorted(by: { $0.date > $1.date }) {
-            let merchant = e.merchant.replacingOccurrences(of: ",", with: " ")
-            let note = e.note.replacingOccurrences(of: ",", with: " ")
-            let acct = e.account.replacingOccurrences(of: ",", with: " ")
-            csv += "\(f.string(from: e.date)),\(String(format: "%.2f", e.amount)),\(e.category.title),\(merchant),\(e.source.title),\(acct),\(note)\n"
+            csv += [f.string(from: e.date), String(format: "%.2f", e.amount), e.kind.title,
+                    e.category.title, e.merchant, e.source.title, e.account, e.note]
+                .map(cell).joined(separator: ",") + "\n"
         }
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("7记账-\(Date().formatted(.dateTime.year().month().day())).csv")

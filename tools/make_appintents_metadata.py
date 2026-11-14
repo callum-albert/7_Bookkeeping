@@ -28,18 +28,6 @@ INTENTS = [
         ],
     },
     {
-        "identifier": "RecordRecentScreenshotIntent",
-        "title": "自动识别刚截的账单",
-        "description": "关闭微信或支付宝后，仅识别90秒内的新截图；需先截屏并提前授权相册",
-        "parameters": [],
-    },
-    {
-        "identifier": "ParseClipboardIntent",
-        "title": "从剪贴板自动记账",
-        "description": "读取剪贴板里的微信/支付宝/银行账单并自动入账",
-        "parameters": [],
-    },
-    {
         "identifier": "RecordFromLatestScreenshotIntent",
         "title": "用最新截图记账",
         "description": "读取相册里最新的一张截图并识别记账，不需要传参数",

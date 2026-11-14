@@ -171,9 +171,9 @@ final class Accounts {
     var bankTotal: Int { cards.reduce(0) { $0 + $1.balanceCents } }
     var total: Int { wechat + alipay + bankTotal }
 
-    func card(tail: String) -> BankCard? {
-        guard !tail.isEmpty else { return cards.first }
-        return cards.first { $0.tail == tail }
+    func card(tail: String, bankName: String = "") -> BankCard? {
+        guard let index = indexOfCard(tail: tail, bankName: bankName) else { return nil }
+        return cards[index]
     }
 
     // MARK: - 修改
@@ -209,11 +209,14 @@ final class Accounts {
     // MARK: - 银行卡管理
     @discardableResult
     func upsertCard(bankName: String, tail: String) -> BankCard {
-        let name = bankName.isEmpty ? "银行卡" : bankName
+        let normalized = Self.canonicalName(bankName)
+        let name = normalized.isEmpty ? "银行卡" : normalized
 
         if !tail.isEmpty {
             // ① 尾号已存在 → 复用
-            if let i = cards.firstIndex(where: { $0.tail == tail }) {
+            let exact = cards.firstIndex { $0.tail == tail && Self.canonicalName($0.bankName) == name }
+            let unspecified = cards.firstIndex { $0.tail == tail && (bankName.isEmpty || $0.bankName == "银行卡" || $0.bankName.isEmpty) }
+            if let i = exact ?? unspecified {
                 if cards[i].bankName.isEmpty || cards[i].bankName == "银行卡" {
                     cards[i].bankName = name
                 }
@@ -221,7 +224,7 @@ final class Accounts {
                 return cards[i]
             }
             // ② 有一张"未指定尾号"的卡 → 给它补上尾号，绝不新建
-            if let i = cards.firstIndex(where: { $0.tail.isEmpty }) {
+            if let i = cards.firstIndex(where: { $0.tail.isEmpty && ($0.bankName == name || $0.bankName == "银行卡" || $0.bankName.isEmpty) }) {
                 let old = cards[i]
                 cards[i] = BankCard(id: old.id, bankName: name, tail: tail,
                                     alias: old.alias, balanceCents: old.balanceCents,
@@ -266,11 +269,12 @@ final class Accounts {
         // 同尾号去重：保留余额大的
         var byTail: [String: Int] = [:]
         for (i, c) in cards.enumerated() where !c.tail.isEmpty {
-            if let j = byTail[c.tail] {
-                if cards[i].balanceCents > cards[j].balanceCents { byTail[c.tail] = i }
+            let key = c.bankName + "|" + c.tail
+            if let j = byTail[key] {
+                if cards[i].balanceCents > cards[j].balanceCents { byTail[key] = i }
                 changed = true
             } else {
-                byTail[c.tail] = i
+                byTail[key] = i
             }
         }
         if changed {
@@ -281,7 +285,7 @@ final class Accounts {
 
         // 多张无尾号卡 → 合并成一张
         let noTail = cards.enumerated().filter { $0.element.tail.isEmpty }
-        if noTail.count > 1 {
+        if noTail.count > 1 && Set(noTail.map { $0.element.bankName }).count == 1 {
             let total = noTail.reduce(0) { $0 + $1.element.balanceCents }
             // 优先保留有具体银行名的
             let best = noTail.max { a, b in
@@ -301,7 +305,7 @@ final class Accounts {
     }
 
     func addCard(bankName: String, tail: String, balanceCents: Int, alias: String = "") {
-        cards.append(BankCard(bankName: bankName, tail: tail, alias: alias,
+        cards.append(BankCard(bankName: Self.canonicalName(bankName), tail: tail, alias: alias,
                               balanceCents: max(0, balanceCents), confirmed: true))
         configured = true
         persist()
@@ -326,49 +330,51 @@ final class Accounts {
     }
 
     // MARK: - 记账扣减
-    func charge(_ cents: Int, channel: PayChannel, tail: String = "") {
+    func charge(_ cents: Int, channel: PayChannel, tail: String = "", bankName: String = "") {
         guard let bucket = channel.balanceBucket else { return }
         switch bucket {
         case .wechat: wechat = max(0, wechat - cents)
         case .alipay: alipay = max(0, alipay - cents)
         case .bank:
-            if let i = indexOfCard(tail: tail) {
+            if let i = indexOfCard(tail: tail, bankName: bankName) {
                 cards[i].balanceCents = max(0, cards[i].balanceCents - cents)
-            } else if !cards.isEmpty {
-                cards[0].balanceCents = max(0, cards[0].balanceCents - cents)
             }
         }
         persist()
     }
 
-    func refund(_ cents: Int, channel: PayChannel, tail: String = "") {
+    func refund(_ cents: Int, channel: PayChannel, tail: String = "", bankName: String = "") {
         guard let bucket = channel.balanceBucket else { return }
         switch bucket {
         case .wechat: wechat += cents
         case .alipay: alipay += cents
         case .bank:
-            if let i = indexOfCard(tail: tail) {
+            if let i = indexOfCard(tail: tail, bankName: bankName) {
                 cards[i].balanceCents += cents
-            } else if !cards.isEmpty {
-                cards[0].balanceCents += cents
             }
         }
         persist()
     }
 
-    private func indexOfCard(tail: String) -> Int? {
-        guard !tail.isEmpty else { return cards.isEmpty ? nil : 0 }
-        if let i = cards.firstIndex(where: { $0.tail == tail }) { return i }
-        return cards.isEmpty ? nil : 0
+    private func indexOfCard(tail: String, bankName: String = "") -> Int? {
+        let indices = cards.indices.filter {
+            (tail.isEmpty || cards[$0].tail == tail)
+                && (bankName.isEmpty || Self.canonicalName(cards[$0].bankName) == Self.canonicalName(bankName))
+        }
+        return indices.count == 1 ? indices[0] : nil
+    }
+
+    private static func canonicalName(_ name: String) -> String {
+        BillParser.bankNames.first { name.contains($0) } ?? name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// 银行短信里带「余额」→ 以它为准校准对应那张卡
-    func applyBankBalance(_ cents: Int, tail: String) {
-        if let i = indexOfCard(tail: tail) {
+    func applyBankBalance(_ cents: Int, tail: String, bankName: String = "") {
+        if let i = indexOfCard(tail: tail, bankName: bankName) {
             cards[i].balanceCents = max(0, cents)
             cards[i].confirmed = true
         } else {
-            cards.append(BankCard(bankName: "银行卡", tail: tail,
+            cards.append(BankCard(bankName: bankName.isEmpty ? "银行卡" : bankName, tail: tail,
                                   balanceCents: max(0, cents), confirmed: true))
         }
         configured = true

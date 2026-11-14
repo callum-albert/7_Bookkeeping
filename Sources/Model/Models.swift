@@ -43,10 +43,52 @@ enum Source: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum EntryKind: String, Codable, CaseIterable, Identifiable {
+    case expense, income
+    var id: String { rawValue }
+    var title: String { self == .income ? "收入" : "支出" }
+}
+
 // MARK: - 分类
-enum Category: String, Codable, CaseIterable, Identifiable {
-    case food, transport, shopping, entertainment, home, medical
-    case education, digital, social, travel, pet, repayment, rent, utilities, other
+struct Category: RawRepresentable, Codable, CaseIterable, Hashable, Identifiable {
+    let rawValue: String
+    init?(rawValue: String) { self.rawValue = rawValue }
+    init(from decoder: Decoder) throws { rawValue = try decoder.singleValueContainer().decode(String.self) }
+    func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
+    static let food = Category(rawValue: "food")!
+    static let transport = Category(rawValue: "transport")!
+    static let shopping = Category(rawValue: "shopping")!
+    static let entertainment = Category(rawValue: "entertainment")!
+    static let home = Category(rawValue: "home")!
+    static let medical = Category(rawValue: "medical")!
+    static let education = Category(rawValue: "education")!
+    static let digital = Category(rawValue: "digital")!
+    static let social = Category(rawValue: "social")!
+    static let travel = Category(rawValue: "travel")!
+    static let pet = Category(rawValue: "pet")!
+    static let repayment = Category(rawValue: "repayment")!
+    static let rent = Category(rawValue: "rent")!
+    static let utilities = Category(rawValue: "utilities")!
+    static let other = Category(rawValue: "other")!
+    static let salary = Category(rawValue: "salary")!
+    static let bonus = Category(rawValue: "bonus")!
+    static let investment = Category(rawValue: "investment")!
+    static let receivedTransfer = Category(rawValue: "receivedTransfer")!
+    static let redPacket = Category(rawValue: "redPacket")!
+    static let refund = Category(rawValue: "refund")!
+    static let otherIncome = Category(rawValue: "otherIncome")!
+    static let builtIns: [Category] = [.food, .transport, .shopping, .entertainment, .home, .medical, .education, .digital, .social, .travel, .pet, .repayment, .rent, .utilities, .other, .salary, .bonus, .investment, .receivedTransfer, .redPacket, .refund, .otherIncome]
+    static var allCases: [Category] { builtIns + CategoryStore.shared.categories }
+    static func choices(for kind: EntryKind) -> [Category] { allCases.filter { $0.kind == kind } }
+    static func custom(_ name: String, kind: EntryKind) -> Category {
+        Category(rawValue: "custom:\(kind.rawValue):\(UUID().uuidString):\(name)")!
+    }
+    var isCustom: Bool { rawValue.hasPrefix("custom:") }
+    var kind: EntryKind {
+        if isCustom { return rawValue.hasPrefix("custom:income:") ? .income : .expense }
+        return [.salary, .bonus, .investment, .receivedTransfer, .redPacket, .refund, .otherIncome].contains(self) ? .income : .expense
+    }
+
 
     var id: String { rawValue }
 
@@ -67,6 +109,14 @@ enum Category: String, Codable, CaseIterable, Identifiable {
         case .rent: return "房租"
         case .utilities: return "水电"
         case .other: return "其他"
+        case .salary: return "工资"
+        case .bonus: return "奖金"
+        case .investment: return "理财收益"
+        case .receivedTransfer: return "转账收款"
+        case .redPacket: return "红包"
+        case .refund: return "退款"
+        case .otherIncome: return "其他收入"
+        default: return rawValue.split(separator: ":", maxSplits: 3).last.map(String.init) ?? "自定义"
         }
     }
 
@@ -87,6 +137,13 @@ enum Category: String, Codable, CaseIterable, Identifiable {
         case .rent: return "key.fill"
         case .utilities: return "bolt.fill"
         case .other: return "ellipsis.circle.fill"
+        case .salary, .bonus: return "banknote.fill"
+        case .investment: return "chart.line.uptrend.xyaxis"
+        case .receivedTransfer: return "arrow.down.left.circle.fill"
+        case .redPacket: return "gift.fill"
+        case .refund: return "arrow.uturn.backward.circle.fill"
+        case .otherIncome: return "plus.circle.fill"
+        default: return "tag.fill"
         }
     }
 
@@ -107,6 +164,7 @@ enum Category: String, Codable, CaseIterable, Identifiable {
         case .rent: return Color(red: 0.45, green: 0.62, blue: 0.88)
         case .utilities: return Color(red: 0.98, green: 0.72, blue: 0.25)
         case .other: return Color(red: 0.58, green: 0.60, blue: 0.64)
+        default: return kind == .income ? Color(red: 0.13, green: 0.65, blue: 0.48) : Color(red: 0.62, green: 0.42, blue: 0.96)
         }
     }
 
@@ -129,7 +187,8 @@ enum Category: String, Codable, CaseIterable, Identifiable {
         static func category(for merchant: String) -> Category? {
             let k = normalize(merchant)
             guard k.count >= 2, let raw = all[k] else { return nil }
-            return Category(rawValue: raw)
+            guard let category = Category(rawValue: raw) else { return nil }
+            return category
         }
 
         static func remember(_ merchant: String, _ category: Category) {
@@ -148,12 +207,16 @@ enum Category: String, Codable, CaseIterable, Identifiable {
             m.removeValue(forKey: normalize(merchant))
             UserDefaults.standard.set(m, forKey: key)
         }
+
+        static func forget(categories: Set<String>) {
+            UserDefaults.standard.set(all.filter { !categories.contains($0.value) }, forKey: key)
+        }
     }
 
     /// 关键字自动归类，命中越多越靠前
     static func guess(from text: String, merchant: String?) -> Category {
         // 优先使用用户教过的分类
-        if let merchant, let learned = MerchantMemory.category(for: merchant) {
+        if let merchant, let learned = MerchantMemory.category(for: merchant), learned.kind == .expense {
             return learned
         }
         let hay = (text + " " + (merchant ?? "")).lowercased()
@@ -194,6 +257,7 @@ enum Category: String, Codable, CaseIterable, Identifiable {
 // MARK: - 一笔账
 struct Entry: Codable, Identifiable, Hashable {
     var id: UUID = UUID()
+    var kind: EntryKind = .expense
     var amountCents: Int
     var date: Date
     var category: Category
@@ -223,8 +287,9 @@ struct Entry: Codable, Identifiable, Hashable {
          merchant: String, note: String = "", source: Source, raw: String = "",
          auto: Bool = true, account: String = "", needsReview: Bool = false,
          mergedSources: [String] = [], channel: PayChannel = .unknown,
-         updatedAt: Date = Date(), hasPaidTime: Bool = false, product: String = "", transactionID: String = "") {
+         updatedAt: Date = Date(), hasPaidTime: Bool = false, product: String = "", transactionID: String = "", kind: EntryKind = .expense) {
         self.id = id
+        self.kind = kind
         self.amountCents = amountCents
         self.date = date
         self.category = category
@@ -247,6 +312,7 @@ struct Entry: Codable, Identifiable, Hashable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
+        kind = try c.decodeIfPresent(EntryKind.self, forKey: .kind) ?? .expense
         amountCents = try c.decode(Int.self, forKey: .amountCents)
         date = try c.decode(Date.self, forKey: .date)
         category = try c.decode(Category.self, forKey: .category)
@@ -267,7 +333,8 @@ struct Entry: Codable, Identifiable, Hashable {
 
     var amountText: String {
         let v = amount
-        if v == v.rounded() { return "¥\(Int(v))" }
-        return String(format: "¥%.2f", v)
+        let prefix = kind == .income ? "+" : ""
+        if v == v.rounded() { return "\(prefix)¥\(Int(v))" }
+        return prefix + String(format: "¥%.2f", v)
     }
 }

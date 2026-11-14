@@ -20,8 +20,6 @@ final class AutoBookkeeper {
         enum Kind { case success, merged, ignored, failed }
     }
 
-    private var lastPasteboardChangeCount = -1
-    private var didFirstLaunch = false
 
     // MARK: - 核心入口
     @discardableResult
@@ -63,7 +61,7 @@ final class AutoBookkeeper {
                 showToast("已合并同一笔 \(total.moneyText)",
                           "\(first.merchant) · 多渠道消息已去重", .merged)
             } else if all.count > 1 {
-                showToast("已自动记账 \(total.moneyText)", "共 \(all.count) 笔", .success)
+                showToast("已记录 \(all.count) 笔", "收入 \(all.filter { $0.kind == .income }.count) 笔 · 支出 \(all.filter { $0.kind == .expense }.count) 笔", .success)
             } else if review {
                 showToast("已记账 \(first.amountText)", "\(first.merchant) · 请核对识别结果", .merged)
             } else {
@@ -112,25 +110,8 @@ final class AutoBookkeeper {
     }
 
     // MARK: - 剪贴板
-    func checkPasteboardIfNeeded() {
-        guard UserDefaults.standard.object(forKey: "autoClipboard") as? Bool ?? true else { return }
-        let pb = UIPasteboard.general
-        // 冷启动：只记录基线，避免把启动前的旧剪贴板当成新账单
-        guard didFirstLaunch else {
-            didFirstLaunch = true
-            lastPasteboardChangeCount = pb.changeCount
-            return
-        }
-        guard pb.changeCount != lastPasteboardChangeCount else { return }
-        lastPasteboardChangeCount = pb.changeCount
-        guard let s = pb.string, s.count > 6, s.count < 6000 else { return }
-        guard BillParser.detectSource(s) != nil, BillParser.extractAmount(s) != nil else { return }
-        _ = ingest(s, source: "剪贴板")
-    }
-
     func ingestClipboardNow() {
         let pb = UIPasteboard.general
-        lastPasteboardChangeCount = pb.changeCount
         guard let s = pb.string, !s.isEmpty else {
             showToast("剪贴板是空的", "先复制微信/支付宝/银行的账单通知", .failed)
             return
@@ -139,16 +120,29 @@ final class AutoBookkeeper {
     }
 
     // MARK: - 手动
-    func addManual(amountCents: Int, category: Category, merchant: String, note: String, date: Date) {
-        let e = Entry(amountCents: amountCents, date: date, category: category,
-                      merchant: merchant.isEmpty ? category.title : merchant,
-                      note: note, source: .manual, auto: false)
-        LedgerStore.shared.add(e)
-        showToast("已记录 \(e.amountText)", e.category.title, .success)
-        let balance = LiveActivityController.balanceInfo(for: e)
-        let islandOK = LiveActivityController.shared.start(for: e, todayTotal: todayTotal(), auto: true)
+    func addManual(amountCents: Int, category: Category, merchant: String, note: String, date: Date,
+                   kind: EntryKind = .expense, channel: PayChannel = .unknown, account: String = "") {
+        let store = LedgerStore.shared
+        let parsed = BillParser.Parsed(amountCents: amountCents, source: .manual, category: category,
+            merchant: merchant.isEmpty ? category.title : merchant, account: account, date: date,
+            raw: "手动录入", flow: kind == .income ? .income : .expense, needsReview: false,
+            channel: channel, balanceAfter: nil, hasPaidTime: true)
+        let outcome = store.ingest(parsed, trigger: .manual)
+        var entry: Entry
+        switch outcome {
+        case .inserted(let e), .merged(let e): entry = e
+        case .duplicate:
+            showToast("这笔已经记过啦", "已自动去重，不会重复更新余额", .merged)
+            return
+        case .ignored: return
+        }
+        entry.auto = false; entry.note = note
+        store.update(entry)
+        showToast("已记录\(kind.title) \(entry.amountText)", entry.category.title, .success)
+        let balance = LiveActivityController.balanceInfo(for: entry)
+        let islandOK = LiveActivityController.shared.start(for: entry, todayTotal: todayTotal(), auto: false)
         if !islandOK, UIApplication.shared.applicationState != .active {
-            NotificationService.shared.notify(entry: e, balanceLabel: balance.label, balanceText: balance.text)
+            NotificationService.shared.notify(entry: entry, balanceLabel: balance.label, balanceText: balance.text)
         }
     }
 

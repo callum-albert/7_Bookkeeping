@@ -187,6 +187,8 @@ struct HomeView: View {
                 }
             }
 
+            Text("今日收入 \(store.summary(in: today, kind: .income).total.moneyText)")
+                .font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.mint)
             Divider().opacity(0.5)
 
             HStack(spacing: 0) {
@@ -291,7 +293,7 @@ struct HomeView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text(items.reduce(0) { $0 + $1.amountCents }.moneyText)
+                Text("支 \(items.filter { $0.kind == .expense }.reduce(0) { $0 + $1.amountCents }.moneyText) · 收 \(items.filter { $0.kind == .income }.reduce(0) { $0 + $1.amountCents }.moneyText)")
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
@@ -470,7 +472,8 @@ struct EntryRow: View {
                         Text(entry.merchant)
                             .font(.system(size: 15, weight: .medium))
                             .foregroundStyle(.primary)
-                            .lineLimit(1)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
                         if entry.needsReview {
                             Text("待确认")
                                 .font(.system(size: 9, weight: .bold))
@@ -488,21 +491,13 @@ struct EntryRow: View {
                                 .background(Color(red: 0.62, green: 0.42, blue: 0.96).opacity(0.16), in: .capsule)
                         }
                     }
-                    HStack(spacing: 6) {
-                        Text(entry.category.title)
-                        Text("·")
-                        Text(entry.source.title)
-                        if !entry.account.isEmpty {
-                            Text("·")
-                            Text(entry.account).lineLimit(1)
-                        }
-                        Text("·")
-                        Text(entry.date.formatted(date: .omitted, time: .shortened)
-                             + (entry.hasPaidTime ? "" : " 记"))
-                    }
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    Text([entry.kind.title, entry.category.title, entry.source.title, entry.account,
+                          entry.date.formatted(date: .omitted, time: .shortened) + (entry.hasPaidTime ? "" : " 记")]
+                        .filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 8)
                 VStack(alignment: .trailing, spacing: 3) {
@@ -539,6 +534,8 @@ struct EntryRow: View {
 struct EntryDetailView: View {
     private var _entry: State<Entry>
     private var entry: Entry { get { _entry.wrappedValue } nonmutating set { _entry.wrappedValue = newValue } }
+    private var _showCategoryManager = State(wrappedValue: false)
+    private var showCategoryManager: Bool { get { _showCategoryManager.wrappedValue } nonmutating set { _showCategoryManager.wrappedValue = newValue } }
     private var _dismiss = Environment(\.dismiss)
     private var dismiss: DismissAction { _dismiss.wrappedValue }
     private var _store = State(wrappedValue: LedgerStore.shared)
@@ -560,13 +557,18 @@ struct EntryDetailView: View {
                     Text(entry.merchant)
                         .font(.system(size: 14))
                         .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity)
                 }
                 .padding(.top, 16)
 
                 VStack(spacing: 0) {
+                    detailRow("收支", entry.kind.title, symbol: entry.kind == .income ? "arrow.down.left" : "arrow.up.right")
+                    Divider().padding(.leading, 16)
                     // 分类
                     Menu {
-                        ForEach(Category.allCases) { c in
+                        ForEach(Category.choices(for: entry.kind)) { c in
                             Button {
                                 entry.category = c
                                 entry.needsReview = false
@@ -576,6 +578,7 @@ struct EntryDetailView: View {
                                 Label(c.title, systemImage: c.symbol)
                             }
                         }
+                        Button("自定义分类…") { showCategoryManager = true }
                     } label: {
                         detailRow("分类", entry.category.title, symbol: "square.grid.2x2")
                     }
@@ -596,10 +599,14 @@ struct EntryDetailView: View {
                             .frame(width: 22)
                         Text("商户")
                             .font(.system(size: 14))
-                        Spacer(minLength: 8)
-                        TextField("商户名称", text: merchantBinding)
+                            .fixedSize()
+                        TextField("商户名称", text: merchantBinding, axis: .vertical)
                             .font(.system(size: 13))
                             .multilineTextAlignment(.trailing)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .layoutPriority(1)
                             .foregroundStyle(.secondary)
                     }
                     .padding(.horizontal, 16)
@@ -666,6 +673,7 @@ struct EntryDetailView: View {
                 }
             }
         }
+        .sheet(isPresented: _showCategoryManager.projectedValue) { CategoryManageView(initialKind: entry.kind) }
     }
 
     /// 支付方式：微信余额 / 支付宝余额 / 招商银行4926 / 花呗 …
@@ -678,7 +686,8 @@ struct EntryDetailView: View {
         case .wechatZero: return "微信余额"
         case .alipayBalance: return "支付宝余额"
         case .wechatCard, .alipayCard, .bank:
-            if let card = Accounts.shared.card(tail: tail), !card.tail.isEmpty {
+            let name = BillParser.bankNames.first { entry.account.contains($0) } ?? ""
+            if let card = Accounts.shared.card(tail: tail, bankName: name), !card.tail.isEmpty {
                 return card.displayName
             }
             if !entry.account.isEmpty { return entry.account }
@@ -720,10 +729,13 @@ struct EntryDetailView: View {
                 .frame(width: 22)
             Text(title)
                 .font(.system(size: 14))
-            Spacer()
+                .fixedSize()
             Text(value)
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 13)

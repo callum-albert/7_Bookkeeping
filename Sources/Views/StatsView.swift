@@ -25,13 +25,13 @@ struct StatsView: View {
     private var maxDaily: Int { max(series.map(\.1).max() ?? 0, 1) }
 
     private var creditTotal: Int {
-        store.entries(in: range).filter { $0.channel.isCredit }.reduce(0) { $0 + $1.amountCents }
+        store.entries(in: range).filter { $0.kind == .expense && $0.channel.isCredit }.reduce(0) { $0 + $1.amountCents }
     }
 
     /// 信用支付（花呗 / 信用卡）单独统计
     private var creditCard: some View {
-        let huabei = store.entries(in: range).filter { $0.channel == .huabei }.reduce(0) { $0 + $1.amountCents }
-        let credit = store.entries(in: range).filter { $0.channel == .creditCard }.reduce(0) { $0 + $1.amountCents }
+        let huabei = store.entries(in: range).filter { $0.kind == .expense && $0.channel == .huabei }.reduce(0) { $0 + $1.amountCents }
+        let credit = store.entries(in: range).filter { $0.kind == .expense && $0.channel == .creditCard }.reduce(0) { $0 + $1.amountCents }
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: "creditcard.fill")
@@ -198,6 +198,10 @@ struct StatsView: View {
                                        startPoint: .topLeading, endPoint: .bottomTrailing))
             }
 
+            HStack(spacing: 0) {
+                statPill("收入", store.summary(in: range, kind: .income).total.moneyText)
+                statPill("结余", (store.summary(in: range, kind: .income).total - summary.total).moneyText)
+            }
             HStack(spacing: 0) {
                 statPill("笔数", "\(summary.count)")
                 statPill("日均", (summary.total / max(daysCount, 1)).moneyText)

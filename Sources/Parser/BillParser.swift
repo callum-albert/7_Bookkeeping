@@ -4,7 +4,7 @@ import Foundation
 /// 处理微信支付、支付宝、银行卡短信/手机银行通知、剪贴板文本、截图 OCR 文本
 ///
 /// 核心原则：
-/// 1. 只有「真实消费」入账；提现 / 充值 / 还款 / 转账 / 收款 / 退款 一律不入账
+/// 1. 消费记支出，收款/红包/退款记收入，本人账户间流动不计收支
 /// 2. 同一笔消费多渠道来消息（微信 + 银行短信 + 手机银行）只记一次
 /// 3. 信息不全（只有银行短信，没有商户）时标记「待确认」，绝不漏记
 enum BillParser {
@@ -13,7 +13,7 @@ enum BillParser {
     enum Flow: String {
         case expense     // 消费，要记账
         case transfer    // 资金内部流动：提现/充值/还款/转账/取现 → 不记账
-        case income      // 收款/退款/红包/工资 → 不记账
+        case income      // 收款/退款/红包/工资 → 收入
     }
 
     struct Parsed {
@@ -34,6 +34,7 @@ enum BillParser {
         var hasPaidTime: Bool = false
         var product: String = ""
         var transactionID: String = ""
+        var kind: EntryKind { flow == .income ? .income : .expense }
     }
 
     // MARK: - 模板化解析（微信 / 支付宝账单详情页）
@@ -41,15 +42,15 @@ enum BillParser {
     ///   当前状态 / 支付时间 / 商品 / 商户全称 / 收单机构 / 支付方式 / 交易单号 / 商户单号
     /// 只认这块里的标准字段，其它内容（交易服务、对订单有疑惑…）一律忽略。
     static let detailLabels = [
-        "当前状态", "交易状态", "支付时间", "交易时间", "付款时间", "消费时间",
+        "当前状态", "交易状态", "退款时间", "到账时间", "领取时间", "收款时间", "转账时间", "支付时间", "交易时间", "付款时间", "消费时间",
         "创建时间", "订单时间", "交易类型", "商品说明", "商品名称", "商品", "商户全称", "商户名称",
-        "商家名称", "收款方", "收款商户", "收单机构", "支付方式", "付款方式",
+        "商家名称", "付款方", "付款人", "对方户名", "转账说明", "退款说明", "收款方", "收款商户", "收单机构", "收款方式", "支付方式", "付款方式",
         "交易单号", "商户单号", "订单号", "实付金额", "实付款", "实际付款", "支付金额",
-        "付款金额", "交易金额", "订单金额", "优惠金额", "优惠", "服务费", "金额"
+        "付款金额", "退款金额", "收款金额", "收入金额", "到账金额", "交易金额", "订单金额", "优惠金额", "优惠", "服务费", "金额"
     ]
 
     static func detailLabel(_ line: String) -> String? {
-        detailLabels.first { line.hasPrefix($0) }
+        detailLabels.sorted { $0.count > $1.count }.first { line.hasPrefix($0) }
     }
 
     private static func valueAfterLabel(_ line: String, _ label: String) -> String {
@@ -62,8 +63,8 @@ enum BillParser {
             .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         let labels = lines.compactMap { detailLabel($0) }
         let identity = ["当前状态", "交易状态", "商户全称", "商户名称", "商家名称", "支付方式",
-                        "付款方式", "支付时间", "交易时间", "商品", "商品说明", "商品名称", "交易单号"]
-        let successLines = lines.filter { ["支付成功", "付款成功", "支付完成"].contains($0) }
+                        "付款方式", "收款方式", "退款时间", "到账时间", "收款时间", "转账时间", "付款方", "退款金额", "收款金额", "支付时间", "交易时间", "商品", "商品说明", "商品名称", "交易单号"]
+        let successLines = lines.filter { ["支付成功", "付款成功", "支付完成", "收款成功", "已收款", "已收钱", "已领取", "退款成功", "退款完成"].contains($0) }
         let successPage = successLines.count == 1 && lines.contains { receiptAmount($0) != nil }
         guard Set(labels).intersection(identity).count >= 2 || successPage else { return nil }
 
@@ -93,9 +94,20 @@ enum BillParser {
             return true
         }
         // 同行字段最可靠；拆行时按类型约束取值，不再按字符串长度盲选。
-        for line in lines {
+        for (index, line) in lines.enumerated() {
             guard let label = detailLabel(line) else { continue }
-            let value = valueAfterLabel(line, label)
+            var value = valueAfterLabel(line, label)
+            if ["商户全称", "商户名称", "商家名称"].contains(label), index + 1 < lines.count {
+                let continuation = lines[index + 1]
+                // 兼容历史 OCR 文本把公司后缀最后几个字单独换行的情况。
+                for suffix in ["有限责任公司", "股份有限公司", "有限公司"] {
+                    for split in 1..<suffix.count {
+                        if value.hasSuffix(String(suffix.prefix(split))) && continuation == String(suffix.dropFirst(split)) {
+                            value += continuation
+                        }
+                    }
+                }
+            }
             if !value.isEmpty { fields[label] = value }
         }
         for (i, line) in lines.enumerated() {
@@ -108,22 +120,22 @@ enum BillParser {
             keys.compactMap { fields[$0] }.first(where: { !$0.isEmpty }) ?? ""
         }
         // 实付字段 > 顶部独立金额 > 交易金额。优惠、余额、单号不参与候选。
-        let explicit = field(["实付金额", "实付款", "实际付款", "支付金额", "付款金额"])
+        let explicit = field(["退款金额", "收款金额", "收入金额", "到账金额", "实付金额", "实付款", "实际付款", "支付金额", "付款金额"])
         let firstField = lines.firstIndex { detailLabel($0) != nil } ?? lines.count
         let headerAmounts = lines.prefix(firstField).compactMap { receiptAmount($0) }
         let amount = receiptAmount(explicit, allowInteger: true) ?? headerAmounts.first
             ?? receiptAmount(field(["交易金额", "金额"]), allowInteger: true)
         guard let amount, amount > 0 else { return nil }
 
-        let product = field(["商品说明", "商品名称", "商品"])
-        var merchant = field(["商户全称", "商户名称", "商家名称", "收款方", "收款商户"])
+        let product = field(["商品说明", "商品名称", "商品", "转账说明", "退款说明"])
+        var merchant = field(["付款方", "付款人", "对方户名", "商户全称", "商户名称", "商家名称", "收款方", "收款商户"])
         if merchant.isEmpty {
             merchant = lines.prefix(firstField).first {
-                looksLikeMerchant($0) && !["账单", "账单详情", "交易详情", "微信支付", "支付宝", "支付成功", "付款成功", "支付完成", "完成", "返回", "更多"].contains($0)
+                looksLikeMerchant($0) && !["账单", "账单详情", "交易详情", "微信支付", "支付宝", "微信红包", "红包详情", "转账", "转账详情", "收款详情", "退款详情", "支付成功", "付款成功", "支付完成", "收款成功", "已收款", "已收钱", "已领取", "退款成功", "退款完成", "完成", "返回", "更多"].contains($0)
                     && receiptAmount($0) == nil && !$0.contains("交易")
             } ?? ""
         }
-        let payment = field(["支付方式", "付款方式"])
+        let payment = field(["收款方式", "支付方式", "付款方式"])
         // 详情页出现银行名通常只是付款卡；不能据此把微信账单判为银行卡来源。
         let source: Source
         if text.contains("微信") {
@@ -134,14 +146,21 @@ enum BillParser {
         } else if payment.contains("余额") || fields["商品说明"] != nil { source = .alipay
         } else if fields["商户单号"] != nil || (fields["当前状态"] != nil && fields["商户全称"] != nil && fields["收单机构"] != nil) { source = .wechat
         } else { source = .manual }
-        let time = field(["支付时间", "交易时间", "付款时间", "消费时间"])
+        let time = field(["退款时间", "到账时间", "领取时间", "收款时间", "转账时间", "支付时间", "交易时间", "付款时间", "消费时间"])
         let paidDate = extractDate(time, now: now)
-        let channel = extractChannel("支付方式:" + payment, source: source)
+        var channel = extractChannel("支付方式:" + payment, source: source)
         let account = extractAccount(payment, source: source)
         let status = field(["当前状态", "交易状态"])
+        let context = status + " " + product + " " + lines.prefix(firstField).joined(separator: " ")
         let productFlow = classify(field(["交易类型"]) + " " + product)
-        let flow: Flow = status.contains("退款") ? .income : (productFlow == .expense ? classify(status) : productFlow)
-        let category = Category.guess(from: merchant + " " + product, merchant: merchant)
+        let flow: Flow = status.contains("退款") || ["收款金额", "收入金额", "到账金额"].contains(where: { fields[$0] != nil }) || lines.prefix(firstField).contains(where: { $0.hasPrefix("+") })
+            ? .income : (productFlow == .expense ? classify(context) : productFlow)
+        if flow == .income, channel == .unknown {
+            if source == .wechat && (text.contains("红包") || text.contains("转账") || text.contains("收款")) { channel = .wechatZero }
+            if source == .alipay && (text.contains("收款") || text.contains("转账")) { channel = .alipayBalance }
+        }
+        let category = flow == .income ? incomeCategory(text, merchant: merchant) : Category.guess(from: merchant + " " + product, merchant: merchant)
+        if flow == .income && merchant.isEmpty { merchant = category.title }
         let ambiguous = Set(headerAmounts).count > 1 && explicit.isEmpty
         return Parsed(amountCents: amount, source: source, category: category,
                       merchant: merchant, account: account, date: paidDate ?? now,
@@ -165,6 +184,7 @@ enum BillParser {
     // MARK: - 主入口
     static func parse(_ text: String, now: Date = Date()) -> [Parsed] {
         let cleaned = normalize(text)
+        if ["待收款", "待领取", "未领取", "未收款", "收款失败", "入账失败", "转账失败", "退款处理中", "退款申请中", "待入账", "预计入账", "未到账"].contains(where: { cleaned.contains($0) }) { return [] }
 
         // ① 账单详情页 → 走模板解析（最可靠）
         if cleaned.components(separatedBy: .newlines).contains(where: {
@@ -212,7 +232,7 @@ enum BillParser {
             let lineFlow = classify(line)
             let flow: Flow = transactionLines > 1 || strongExpense.contains(where: { line.contains($0) }) ? lineFlow : wholeFlow
 
-            let merchant = extractMerchant(line, full: cleaned) ?? ""
+            let merchant = extractMerchant(line, full: transactionLines > 1 ? line : cleaned) ?? ""
             var account = extractAccount(line, source: source)
             if account.isEmpty { account = extractAccount(cleaned, source: source) }
 
@@ -221,14 +241,14 @@ enum BillParser {
 
             // 花呗还款：用户要求算作消费，单独归类「还款」
             let isHuabeiRepay = cleaned.contains("花呗") && cleaned.contains("还款")
-            var category = merchant.isEmpty ? .other : Category.guess(from: cleaned, merchant: merchant)
+            var category = flow == .income ? incomeCategory(line, merchant: merchant) : (merchant.isEmpty ? .other : Category.guess(from: line, merchant: merchant))
             if isHuabeiRepay { category = .repayment }
 
             // 优先账单里的「支付时间」字段；其次金额所在行自身的时间；
             // 不再从全文里抓孤立的 HH:mm（那是状态栏时间，不是支付时间）
-            let paidDate = extractPaidTime(cleaned)
+            let paidDate = transactionLines > 1 ? extractDate(line, now: now) : (extractPaidTime(cleaned)
                 ?? extractFullDateTime(cleaned)
-                ?? extractDate(line, now: now)
+                ?? extractDate(line, now: now))
             out.append(Parsed(
                 amountCents: cents,
                 source: source,
@@ -238,7 +258,7 @@ enum BillParser {
                 date: paidDate ?? now,
                 raw: cleaned.count > 600 ? String(cleaned.prefix(600)) : cleaned,
                 flow: flow,
-                needsReview: flow == .expense && (merchant.isEmpty || source == .bank),
+                needsReview: merchant.isEmpty || (flow == .expense && source == .bank) || (flow == .income && (category == .otherIncome || channel == .unknown)),
                 channel: channel,
                 balanceAfter: extractBalance(line) ?? extractBalance(cleaned),
                 hasPaidTime: paidDate != nil
@@ -249,7 +269,7 @@ enum BillParser {
         if out.count > 1 {
             var seen = Set<String>()
             out = out.filter {
-                let k = "\($0.amountCents)-\($0.merchant)-\($0.source.rawValue)"
+                let k = "\($0.amountCents)-\($0.merchant)-\($0.source.rawValue)-\($0.flow.rawValue)-\($0.hasPaidTime ? String(Int($0.date.timeIntervalSince1970)) : "")"
                 if seen.contains(k) { return false }
                 seen.insert(k); return true
             }
@@ -271,7 +291,8 @@ enum BillParser {
 
     // MARK: - 平台识别
     static func detectSource(_ s: String) -> Source? {
-        // 微信/支付宝优先：银行短信里也可能出现「微信」字样
+        if s.hasPrefix("【"), s.contains("银行】"), s.contains("尾号") || s.contains("账户") { return .bank }
+        // 微信/支付宝优先：普通账单中的支付平台字样优先
         if s.contains("微信") { return .wechat }
         if s.contains("支付宝") || s.contains("花呗") || s.contains("余额宝") || s.contains("alipay") { return .alipay }
         if isBankText(s) { return .bank }
@@ -286,7 +307,7 @@ enum BillParser {
 
     static func isBankText(_ s: String) -> Bool {
         // 必须有金融动作词，避免把普通文本误判成银行
-        let action = ["消费", "支出", "扣款", "转出", "转入", "取现", "存入", "交易", "支付", "付款"]
+        let action = ["消费", "支出", "扣款", "转出", "转入", "取现", "存入", "交易", "支付", "付款", "入账", "收入", "到账", "贷记", "汇入", "代发工资"]
         guard action.contains(where: { s.contains($0) }) else { return false }
         return bankHints.contains(where: { s.contains($0) })
     }
@@ -318,6 +339,8 @@ enum BillParser {
         if refundPhrases.contains(where: { s.contains($0) }) {
             return .income
         }
+        if ["本人账户", "本人转账", "自己账户", "零钱提现", "余额提现", "零钱充值", "余额充值", "余额宝转入", "余额宝转出"].contains(where: { s.contains($0) }) { return .transfer }
+        if ["收款到账", "收款成功", "已收款", "已收钱", "已存入零钱", "已领取", "红包收入", "红包到账", "收到红包", "入账", "收入", "向你转账", "转入人民币", "转入金额", "到账人民币", "工资到账", "存入人民币", "贷记", "汇入", "代发工资"].contains(where: { s.contains($0) }) { return .income }
         // 1.5) 花呗还款：按需求算作消费（其余还款仍视为资金转移）
         if s.contains("花呗") && (s.contains("还款") || s.contains("已还")) { return .expense }
         // 2) 强消费信号最优先：「付款成功 / 支付成功 / 消费 / 支出」
@@ -338,25 +361,38 @@ enum BillParser {
         return .expense
     }
 
+    static func incomeCategory(_ text: String, merchant: String = "") -> Category {
+        if ["退款", "退还", "退回", "退票"].contains(where: { text.contains($0) }) { return .refund }
+        if let learned = Category.MerchantMemory.category(for: merchant), learned.kind == .income { return learned }
+        if text.contains("红包") { return .redPacket }
+        if text.contains("工资") || text.contains("薪资") || text.contains("代发") { return .salary }
+        if text.contains("奖金") { return .bonus }
+        if text.contains("利息") || text.contains("收益") || text.contains("分红") { return .investment }
+        if text.contains("转账") || text.contains("收款") || text.contains("汇入") { return .receivedTransfer }
+        return .otherIncome
+    }
+
     // MARK: - 余额行过滤
     private static func isBalanceLine(_ s: String) -> Bool {
         let balanceWords = ["余额", "可用余额", "剩余额度", "总额度", "积分", "额度为"]
         guard balanceWords.contains(where: { s.contains($0) }) else { return false }
         // 「消费25元，余额1000元」这种同一行里既有交易又有余额 → 保留
-        let tradeWords = ["消费", "支出", "扣款", "付款", "支付", "转出", "取现"]
+        let tradeWords = ["消费", "支出", "扣款", "付款", "支付", "转出", "取现", "入账", "收入", "收款", "到账", "存入", "转入"]
         return !tradeWords.contains(where: { s.contains($0) })
     }
 
     // MARK: - 金额提取
     // 顺序很重要：先找带交易语义的金额，再退回带符号/单位
     private static let amountPatterns: [String] = [
-        #"(?:消费|支出|扣款|付款|支付|转出|转给|交易|金额|合计|总计|实付)\D{0,6}?¥?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)"#,
+        #"(?:消费|支出|扣款|付款|支付|入账|收入|收款|到账|贷记|汇入|存入|代发工资|转入|转出|转给|交易|金额|合计|总计|实付)(?!时间|日期|单号|编号|方式|卡号)\D{0,6}?¥?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)(?![0-9.年月日:/])"#,
         #"¥\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)"#,
         #"([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*元"#,
-        #"(?<![0-9.])([0-9]+\.[0-9]{2})(?![0-9])"#
+        #"(?<![0-9.])([0-9]+\.[0-9]{2})(?![0-9.])"#
     ]
 
     static func extractAmount(_ s: String) -> Int? {
+        if let label = detailLabel(s.trimmingCharacters(in: .whitespaces)),
+           !label.contains("金额"), !["金额", "实付款", "实际付款"].contains(label) { return nil }
         for p in amountPatterns {
             if let m = firstMatch(p, in: s, group: 1) {
                 let digits = m.replacingOccurrences(of: ",", with: "")
@@ -537,16 +573,18 @@ enum BillParser {
 
     /// 没有任何平台字样，但有明确的「支付成功 + 金额」 → 仍然记账（宁可待确认，也不漏记）
     private static func looksLikePayment(_ s: String) -> Bool {
-        let words = ["支付成功", "付款成功", "交易成功", "已支付", "支付完成",
+        let words = ["支付成功", "付款成功", "交易成功", "已支付", "支付完成", "收款成功", "已收款", "已收钱", "红包到账", "已领取",
                      "付款完成", "转账成功", "支付金额", "实付", "已付款"]
         return words.contains(where: { s.contains($0) })
     }
 
     // MARK: - 支付渠道（卡 / 零钱 / 花呗）
-    private static let bankNames = [
+    static let bankNames = [
         "招商银行", "中国银行", "工商银行", "建设银行", "农业银行", "交通银行", "邮储银行",
         "邮政储蓄", "中信银行", "浦发银行", "兴业银行", "光大银行", "华夏银行", "民生银行",
-        "广发银行", "平安银行", "北京银行", "上海银行", "宁波银行", "江苏银行", "浙商银行"
+        "广发银行", "平安银行", "北京银行", "上海银行", "宁波银行", "江苏银行", "浙商银行",
+        "杭州银行", "南京银行", "成都银行", "长沙银行", "苏州银行", "重庆银行", "青岛银行",
+        "渤海银行", "恒丰银行", "天津银行", "徽商银行", "厦门银行", "上海农商银行", "深圳农商银行"
     ]
 
     static func extractAccount(_ s: String, source: Source) -> String {
@@ -555,15 +593,17 @@ enum BillParser {
         for name in bankNames where s.contains(name) { parts.append(name); break }
 
         let tailPatterns = [
-            #"(?:尾号|末四位|后四位|最后四位)[^0-9]{0,4}(\d{4})"#,
-            #"卡号[^0-9]{0,6}(\d{4})"#,
-            #"\*{2,}(\d{4})"#,
-            #"账户[^0-9]{0,6}(\d{4})"#,
-            #"(?:储蓄卡|借记卡|信用卡)[^0-9]{0,6}(\d{4})"#,
+            #"(?:尾号|末四位|后四位|最后四位)[^0-9]{0,4}(\d{4})(?![0-9])"#,
+            #"\*{2,}\s*(\d{4})(?![0-9])"#,
+            #"卡号[^0-9]{0,6}(\d{4})(?![0-9*•xX])"#,
+            #"账户[^0-9]{0,6}(\d{4})(?![0-9])"#,
+            #"(?:储蓄卡|借记卡|信用卡)[^0-9]{0,6}(\d{4})(?![0-9])"#,
             #"[\(（](\d{4})[\)）]"#,               // 招商银行储蓄卡(4926)
             #"银行[^0-9]{0,4}(\d{4})(?![0-9])"#     // 招商银行4926
         ]
-        if let tail = tailPatterns.lazy.compactMap({ firstMatch($0, in: s, group: 1) }).first {
+        let compact = s.replacingOccurrences(of: #"(?<=[0-9])[ -](?=[0-9])"#, with: "", options: .regularExpression)
+        let fullNumber = firstMatch(#"(?:卡号|账号|账户|储蓄卡|借记卡|信用卡)[^0-9]{0,6}([0-9]{12,19})(?![0-9])"#, in: compact, group: 1)
+        if let tail = fullNumber.map({ String($0.suffix(4)) }) ?? tailPatterns.lazy.compactMap({ firstMatch($0, in: s, group: 1) }).first {
             if let last = parts.last, !last.contains("(") {
                 parts[parts.count - 1] = "\(last)(\(tail))"
             } else {

@@ -63,6 +63,22 @@ final class LedgerStore {
         ignoredURL = dir.appendingPathComponent("ignored.json")
         deletedURL = dir.appendingPathComponent("deleted.json")
         load()
+        var repaired = false
+        for index in entries.indices {
+            let old = entries[index].merchant
+            // 老版本 raw 可能只保存字段区，不含顶部金额；使用已存金额辅助解析，不修改金额。
+            let reparsedText = entries[index].raw + "\n金额 " + entries[index].amountCents.moneyText
+            if let parsed = BillParser.parse(reparsedText).first,
+               parsed.amountCents == entries[index].amountCents,
+               parsed.merchant.count > old.count, parsed.merchant.hasPrefix(old),
+               ["司", "公司", "限公司", "有限公司"].contains(String(parsed.merchant.dropFirst(old.count))) {
+                entries[index].merchant = parsed.merchant
+                entries[index].updatedAt = Date()
+                repaired = true
+            }
+        }
+        if repaired { persist() }
+        for entry in entries { registerCard(account: entry.account, channel: entry.channel) }
     }
 
     // MARK: - 持久化
@@ -97,20 +113,33 @@ final class LedgerStore {
     @discardableResult
     func ingest(_ p: BillParser.Parsed, trigger: Trigger = .automatic) -> Outcome {
         // 1) 非消费，直接忽略并留档
-        if p.flow != .expense {
+        if p.flow == .transfer {
             let reason = p.flow == .transfer ? "转账 / 提现 / 还款" : "收款 / 退款"
             recordIgnored(p, reason: reason)
             return .ignored(reason)
         }
 
         // 2) 找候选：金额相同 + 时间接近
+        registerCard(account: p.account, channel: p.channel)
         if !p.transactionID.isEmpty, let same = entries.first(where: {
-            $0.source == p.source && $0.transactionID == p.transactionID
-        }) { return .duplicate(same) }
+            $0.kind == p.kind && $0.source == p.source && $0.transactionID == p.transactionID
+        }) {
+            var updated = same
+            merge(&updated, with: p)
+            guard updated != same else { return .duplicate(same) }
+            update(updated)
+            if updated.channel != same.channel || updated.account != same.account {
+                applyBalance(same, undo: true); applyBalance(updated)
+            }
+            return .merged(updated)
+        }
         //    自动触发 5 分钟；手动触发 30 分钟（人按按钮可能晚一点）
         let candidates = entries.filter {
-            $0.amountCents == p.amountCents
+            $0.kind == p.kind && $0.amountCents == p.amountCents
             && abs($0.date.timeIntervalSince(p.date)) <= trigger.window
+            && !(p.source != .manual && $0.source == p.source && paidTimesConflict($0, p))
+            && !(bankTail(of: $0.account).isEmpty == false && bankTail(of: p.account).isEmpty == false && bankTail(of: $0.account) != bankTail(of: p.account))
+            && !(bankName(of: $0.account).isEmpty == false && bankName(of: p.account).isEmpty == false && bankName(of: $0.account) != bankName(of: p.account))
             && !($0.source == p.source && !$0.transactionID.isEmpty && !p.transactionID.isEmpty && $0.transactionID != p.transactionID)
         }
 
@@ -131,12 +160,12 @@ final class LedgerStore {
             let bringsNewInfo = !isVague(p) || !p.account.isEmpty || p.channel != .unknown
             if isVague(same), bringsNewInfo {
                 var e = same
-                let oldChannel = e.channel
+                let oldEntry = e
                 merge(&e, with: p)
                 update(e)
-                if oldChannel != e.channel {
-                    Accounts.shared.refund(e.amountCents, channel: oldChannel, tail: bankTail(of: e.account))
-                    Accounts.shared.charge(e.amountCents, channel: e.channel, tail: bankTail(of: e.account))
+                if oldEntry.channel != e.channel || oldEntry.account != e.account {
+                    applyBalance(oldEntry, undo: true)
+                    applyBalance(e)
                 }
                 return .merged(e)
             }
@@ -155,18 +184,18 @@ final class LedgerStore {
         // 5) 跨渠道合并：微信/支付宝 ↔ 银行短信/手机银行 ↔ 手动按键
         if let existing = candidates.first(where: { canMerge($0, p) }) {
             var e = existing
-            let oldChannel = e.channel
+            let oldEntry = e
             merge(&e, with: p)
             update(e)
 
             // 渠道变了 → 把余额从旧资金池挪到新资金池
-            if oldChannel != e.channel {
-                Accounts.shared.refund(e.amountCents, channel: oldChannel, tail: bankTail(of: e.account))
-                Accounts.shared.charge(e.amountCents, channel: e.channel, tail: bankTail(of: e.account))
+            if oldEntry.channel != e.channel || oldEntry.account != e.account {
+                applyBalance(oldEntry, undo: true)
+                applyBalance(e)
             }
             // 短信里带余额 → 以余额为准校准
             if let bal = p.balanceAfter, e.channel.balanceBucket == .bank {
-                Accounts.shared.applyBankBalance(bal, tail: bankTail(of: e.account))
+                Accounts.shared.applyBankBalance(bal, tail: bankTail(of: e.account), bankName: bankName(of: e.account))
             }
             return .merged(e)
         }
@@ -184,19 +213,14 @@ final class LedgerStore {
             account: p.account,
             needsReview: p.needsReview,
             channel: p.channel,
-            hasPaidTime: p.hasPaidTime, product: p.product, transactionID: p.transactionID
+            hasPaidTime: p.hasPaidTime, product: p.product, transactionID: p.transactionID, kind: p.kind
         )
         add(entry)
 
-        // 识别到银行卡尾号 → 自动登记这张卡（余额待用户设置）
         let tail = bankTail(of: entry.account)
-        if entry.channel.balanceBucket == .bank, !entry.account.isEmpty {
-            Accounts.shared.upsertCard(bankName: bankName(of: entry.account), tail: tail)
-        }
-        // 扣减对应余额（花呗 / 信用卡不占余额）
-        Accounts.shared.charge(entry.amountCents, channel: entry.channel, tail: tail)
+        applyBalance(entry)
         if let bal = p.balanceAfter, entry.channel.balanceBucket == .bank {
-            Accounts.shared.applyBankBalance(bal, tail: tail)
+            Accounts.shared.applyBankBalance(bal, tail: tail, bankName: bankName(of: entry.account))
         }
         return .inserted(entry)
     }
@@ -208,9 +232,8 @@ final class LedgerStore {
             return fuzzyMatch(existing.merchant, p.merchant)
         }
         // 跨平台：任意一方信息模糊（银行短信无商户 / 待确认）即可合并
-        let existingVague = existing.merchant.isEmpty
-            || existing.source == .bank
-        let newVague = p.merchant.isEmpty || p.source == .bank
+        let existingVague = isVague(existing)
+        let newVague = isVague(p)
         if existingVague || newVague { return true }
         return fuzzyMatch(existing.merchant, p.merchant)
     }
@@ -239,7 +262,7 @@ final class LedgerStore {
 
         // 渠道信息累加：招商银行(1234) · 零钱
         if !p.account.isEmpty, !e.account.contains(p.account) {
-            e.account = e.account.isEmpty ? p.account : e.account + " · " + p.account
+            if e.account.isEmpty || (bankTail(of: e.account).isEmpty && !bankTail(of: p.account).isEmpty) { e.account = p.account }
         }
 
         // 来源升级：通知类（微信/支付宝）比银行短信信息更全
@@ -266,12 +289,13 @@ final class LedgerStore {
     /// 信息是否模糊（没有可用商户名，或来自银行短信）
     private func isVague(_ e: Entry) -> Bool {
         e.merchant.isEmpty
-            || e.source == .bank
             || e.merchant == e.source.title
+            || ["财付通", "微信支付", "支付宝", "银联", "网联", "快捷支付"].contains(e.merchant)
     }
 
     private func isVague(_ p: BillParser.Parsed) -> Bool {
-        p.merchant.isEmpty || p.source == .bank
+        p.merchant.isEmpty || p.merchant == p.source.title
+            || ["财付通", "微信支付", "支付宝", "银联", "网联", "快捷支付"].contains(p.merchant)
     }
 
     private func channelPriority(_ c: PayChannel) -> Int {
@@ -285,11 +309,34 @@ final class LedgerStore {
     }
 
     private func bankName(of account: String) -> String {
-        let names = ["招商银行", "中国银行", "工商银行", "建设银行", "农业银行", "交通银行",
-                     "邮储银行", "邮政储蓄", "中信银行", "浦发银行", "兴业银行", "光大银行",
-                     "华夏银行", "民生银行", "广发银行", "平安银行", "北京银行", "上海银行",
-                     "宁波银行", "江苏银行", "浙商银行"]
-        return names.first { account.contains($0) } ?? ""
+        BillParser.bankNames.first { account.contains($0) } ?? ""
+    }
+
+    private func paidTimesConflict(_ entry: Entry, _ parsed: BillParser.Parsed) -> Bool {
+        guard entry.hasPaidTime, parsed.hasPaidTime,
+              abs(entry.date.timeIntervalSince(parsed.date)) > 1 else { return false }
+        func includesSeconds(_ text: String) -> Bool {
+            text.range(of: #"[0-9]{1,2}[:：][0-9]{2}[:：][0-9]{2}"#, options: .regularExpression) != nil
+        }
+        if includesSeconds(entry.raw) && includesSeconds(parsed.raw) { return true }
+        // 一条只显示分钟、另一条显示秒时，同一分钟内仍可能是同一笔。
+        return !Calendar.current.isDate(entry.date, equalTo: parsed.date, toGranularity: .minute)
+    }
+
+    private func registerCard(account: String, channel: PayChannel) {
+        let name = bankName(of: account), tail = bankTail(of: account)
+        guard channel.balanceBucket == .bank || channel == .creditCard || (!name.isEmpty && !tail.isEmpty) else { return }
+        guard !name.isEmpty || !tail.isEmpty else { return }
+        Accounts.shared.upsertCard(bankName: name, tail: tail)
+    }
+
+    private func applyBalance(_ entry: Entry, undo: Bool = false) {
+        let name = bankName(of: entry.account), tail = bankTail(of: entry.account)
+        if (entry.kind == .income) != undo {
+            Accounts.shared.refund(entry.amountCents, channel: entry.channel, tail: tail, bankName: name)
+        } else {
+            Accounts.shared.charge(entry.amountCents, channel: entry.channel, tail: tail, bankName: name)
+        }
     }
 
     private func bankTail(of account: String) -> String {
@@ -304,9 +351,7 @@ final class LedgerStore {
         let nb = normalizeName(b)
         if na.isEmpty || nb.isEmpty { return na.isEmpty && nb.isEmpty }
         if na == nb { return true }
-        if na.contains(nb) || nb.contains(na) { return true }
-        let prefixA = String(na.prefix(4)), prefixB = String(nb.prefix(4))
-        return !prefixA.isEmpty && prefixA == prefixB
+        return min(na.count, nb.count) >= 2 && (na.contains(nb) || nb.contains(na))
     }
 
     private func normalizeName(_ s: String) -> String {
@@ -334,21 +379,17 @@ final class LedgerStore {
     func restoreIgnored(_ ev: IgnoredEvent) {
         ignored.removeAll { $0.id == ev.id }
         guard let cents = ev.amountCents else { persist(); return }
-        let parsed = BillParser.parse(ev.text).first
-        let entry = Entry(
-            amountCents: cents,
-            date: ev.date,
-            category: parsed?.category ?? .other,
-            merchant: (parsed?.merchant.isEmpty == false ? parsed!.merchant : ev.source.title),
-            source: ev.source,
-            raw: ev.text,
-            auto: false,
-            account: parsed?.account ?? "",
-            needsReview: true
-        )
-        entries.append(entry)
-        Accounts.shared.charge(entry.amountCents, channel: entry.channel,
-                               tail: bankTail(of: entry.account))
+        var parsed = BillParser.parse(ev.text).first ?? BillParser.Parsed(
+            amountCents: cents, source: ev.source, category: .other, merchant: ev.source.title,
+            account: "", date: ev.date, raw: ev.text, flow: .expense,
+            needsReview: true, channel: .unknown, balanceAfter: nil)
+        if parsed.flow == .transfer { parsed.flow = .expense }
+        parsed.needsReview = true
+        switch ingest(parsed, trigger: .manual) {
+        case .inserted(var entry), .merged(var entry):
+            entry.auto = false; update(entry)
+        default: break
+        }
         persist()
     }
 
@@ -375,8 +416,7 @@ final class LedgerStore {
         entries.removeAll { $0.id == entry.id }
         if !deletedIDs.contains(entry.id) { deletedIDs.append(entry.id) }
         if deletedIDs.count > 500 { deletedIDs = Array(deletedIDs.suffix(500)) }
-        Accounts.shared.refund(entry.amountCents, channel: entry.channel,
-                               tail: bankTail(of: entry.account))
+        applyBalance(entry, undo: true)
         persist()
         onDataChanged?()
     }
@@ -403,13 +443,15 @@ final class LedgerStore {
             entries: entries,
             ignored: Array(ignored.prefix(200)),
             deletedIDs: deletedIDs,
-            balances: Accounts.shared.exportBalances()
+            balances: Accounts.shared.exportBalances(),
+            customCategories: CategoryStore.shared.categories, deletedCategories: CategoryStore.shared.deleted
         )
     }
 
     /// 合并远端快照：按 id 去重，updatedAt 新者胜；墓碑优先
     @discardableResult
     func mergeRemote(_ payload: SyncPayload) -> (added: Int, updated: Int, removed: Int) {
+        CategoryStore.shared.merge(payload.customCategories ?? [], deleted: payload.deletedCategories ?? [])
         var tomb = Set(deletedIDs)
         for id in payload.deletedIDs { tomb.insert(id) }
         deletedIDs = Array(tomb)
@@ -461,11 +503,11 @@ final class LedgerStore {
     }
 
     func entries(in range: DateInterval) -> [Entry] {
-        entries.filter { range.contains($0.date) }.sorted { $0.date > $1.date }
+        entries.filter { $0.date >= range.start && $0.date < range.end }.sorted { $0.date > $1.date }
     }
 
-    func summary(in range: DateInterval) -> Summary {
-        let items = entries(in: range)
+    func summary(in range: DateInterval, kind: EntryKind = .expense) -> Summary {
+        let items = entries(in: range).filter { $0.kind == kind }
         var s = Summary()
         s.count = items.count
         s.total = items.reduce(0) { $0 + $1.amountCents }
@@ -484,7 +526,7 @@ final class LedgerStore {
     func dailySeries(in range: DateInterval) -> [(Date, Int)] {
         let cal = Calendar.current
         var map: [Date: Int] = [:]
-        for e in entries(in: range) {
+        for e in entries(in: range) where e.kind == .expense {
             map[cal.startOfDay(for: e.date), default: 0] += e.amountCents
         }
         var out: [(Date, Int)] = []

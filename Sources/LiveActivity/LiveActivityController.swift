@@ -181,7 +181,8 @@ final class LiveActivityController {
             return ("支付宝余额", a.alipay.moneyText)
         case .wechatCard, .alipayCard, .bank:
             let tail = Self.tail(from: entry.account)
-            if let card = a.card(tail: tail), !card.tail.isEmpty {
+            let name = BillParser.bankNames.first { entry.account.contains($0) } ?? ""
+            if let card = a.card(tail: tail, bankName: name), !card.tail.isEmpty {
                 return (card.displayName, card.balanceCents.moneyText)
             }
             return ("银行卡", a.bankTotal.moneyText)

@@ -141,6 +141,7 @@ check("信用卡短信 → 信用卡渠道", parse1("您尾号5678的信用卡�
 print("\n── 11. 余额校准 ──")
 check("银行短信提取余额", b1?.balanceAfter == 123456, "\(String(describing: b1?.balanceAfter))")
 let acct = Accounts.shared
+for card in acct.cards { acct.removeCard(id: card.id) }
 acct.setAll(wechat: 100000, alipay: 50000, bank: 800000)
 check("手动设置余额", acct.balance(.wechat) == 100000 && acct.total == 950000, "\(acct.total)")
 
@@ -631,34 +632,6 @@ check("微信支付宝分别消费不误合并", reviewStore.entries.count == be
 if let r { _ = reviewStore.ingest(r) }
 check("识别商品写入账本", reviewStore.entries.contains { $0.product == "咖啡豆礼盒" })
 
-print("\n── 26. 自动识屏会话门控 ──")
-var screenGate = ScreenReceiptGate()
-check("第一帧不立即入账", !screenGate.accept(receipt, now: base))
-check("两次稳定结果后允许入账", screenGate.accept(receipt, now: base.addingTimeInterval(2)))
-check("支付页持续显示只入账一次", !screenGate.accept(receipt, now: base.addingTimeInterval(4)))
-let anotherReceipt = receipt.replacingOccurrences(of: "星巴克咖啡上海有限公司", with: "另一家餐饮有限公司")
-    .replacingOccurrences(of: "4200003231202611130744450480", with: "4200003231202611130744450481")
-check("同金额不同商户先稳定检测", !screenGate.accept(anotherReceipt, now: base.addingTimeInterval(6)))
-check("同金额不同商户允许第二笔", screenGate.accept(anotherReceipt, now: base.addingTimeInterval(8)))
-var interruptedGate = ScreenReceiptGate()
-_ = interruptedGate.accept(receipt, now: base)
-check("切到普通画面不入账", !interruptedGate.accept("普通聊天内容，商品报价32元", now: base.addingTimeInterval(1)))
-check("画面切换后重新计稳定时间", !interruptedGate.accept(receipt, now: base.addingTimeInterval(2)))
-check("重新稳定后可记账", interruptedGate.accept(receipt, now: base.addingTimeInterval(4)))
-var refundGate = ScreenReceiptGate()
-let refundPage = receipt.replacingOccurrences(of: "支付成功", with: "退款成功")
-_ = refundGate.accept(refundPage, now: base)
-check("退款页多帧也不自动记消费", !refundGate.accept(refundPage, now: base.addingTimeInterval(2)))
-var failedGate = ScreenReceiptGate()
-let failedPage = receipt.replacingOccurrences(of: "支付成功", with: "支付失败")
-_ = failedGate.accept(failedPage, now: base)
-check("失败页不自动记账", !failedGate.accept(failedPage, now: base.addingTimeInterval(2)))
-var bankGate = ScreenReceiptGate()
-_ = bankGate.accept("招商银行 消费100元", now: base)
-check("非支付成功页面不被识屏通道误记", !bankGate.accept("招商银行 消费100元", now: base.addingTimeInterval(2)))
-var freshGate = ScreenReceiptGate()
-check("新会话不继承旧画面的待记状态", !freshGate.accept(receipt, now: base.addingTimeInterval(20)))
-
 var txnA = mk(5555, .wechat, "同店咖啡", .wechatZero, base, false)
 txnA.transactionID = "transaction0001"
 var txnB = txnA
@@ -670,9 +643,162 @@ check("同店同金额但单号不同保留两笔", reviewStore.entries.count ==
 txnA.date = base.addingTimeInterval(86400)
 _ = reviewStore.ingest(txnA)
 check("同单号隔天重识别也不重复扣款", reviewStore.entries.count == beforeTransactions + 2)
-let sameShopNextOrder = receipt.replacingOccurrences(of: "4200003231202611130744450480", with: "4200003231202611130744450482")
-check("同店新单号仍需稳定画面", !screenGate.accept(sameShopNextOrder, now: base.addingTimeInterval(30)))
-check("同店新单号可以再次自动记账", screenGate.accept(sameShopNextOrder, now: base.addingTimeInterval(32)))
+print("\n── 收入、退款、双入口银行卡和自定义分类 ──")
+let wageText = "【招商银行】您尾号8201账户于11月15日12:30工资入账5000.00元，余额8000.00元"
+let wage = BillParser.parse(wageText, now: base).first!
+check("银行入账识别收入及工资分类", wage.flow == .income && wage.category == .salary && wage.amountCents == 500000)
+check("入账短信提取银行和尾号", wage.account == "招商银行(8201)")
+let incomeStore = LedgerStore()
+let wageCount = incomeStore.entries.count
+_ = incomeStore.ingest(wage, trigger: .automatic)
+check("自动收入短信添加新卡", acct.cards.contains { $0.bankName == "招商银行" && $0.tail == "8201" })
+check("入账余额按短信校准", acct.card(tail: "8201", bankName: "招商银行")?.balanceCents == 800000)
+_ = incomeStore.ingest(wage, trigger: .manual)
+check("收入重复记账不增账不增余额", incomeStore.entries.count == wageCount + 1 && acct.card(tail: "8201", bankName: "招商银行")?.balanceCents == 800000)
+
+let redPacket = """
+微信红包
++8.88
+当前状态 已领取
+收款时间 2026-11-15 12:40:30
+付款方 张先生
+收款方式 零钱
+交易单号 1000000000000000888
+"""
+let rp = BillParser.parse(redPacket, now: base).first!
+check("按键截图文本识别红包收入", rp.kind == .income && rp.category == .redPacket && rp.channel == .wechatZero && rp.amountCents == 888)
+let wechatBeforeIncome = acct.wechat
+_ = incomeStore.ingest(rp, trigger: .manual)
+_ = incomeStore.ingest(rp, trigger: .manual)
+check("红包重复识别只加一次余额", acct.wechat == wechatBeforeIncome + 888)
+if let entry = incomeStore.entries.first(where: { $0.transactionID == rp.transactionID }) {
+    incomeStore.delete(entry)
+    check("删除收入撤回余额增加", acct.wechat == wechatBeforeIncome)
+} else { check("删除收入撤回余额增加", false) }
+
+let alipayReceipt = redPacket.replacingOccurrences(of: "微信红包", with: "支付宝 转账收款").replacingOccurrences(of: "已领取", with: "收款成功").replacingOccurrences(of: "零钱", with: "余额")
+let ar = BillParser.parse(alipayReceipt).first!
+check("支付宝转账收款识别收入", ar.flow == .income && ar.category == .receivedTransfer && ar.channel == .alipayBalance)
+check("付款方不会误匹配付款方式", ar.merchant == "张先生")
+check("待领取红包不入账", BillParser.parse(redPacket.replacingOccurrences(of: "已领取", with: "待领取")).isEmpty)
+check("未到账提示不入账", BillParser.parse("招商银行 预计入账100.00元，暂未到账").isEmpty)
+check("自己账户互转不算收入", BillParser.classify("招商银行 本人账户转入100.00元") == .transfer)
+
+var outgo = mk(2222, .wechat, "退款商户", .wechatZero, base, false)
+outgo.transactionID = "sameOrderForRefund"
+var moneyBack = outgo
+moneyBack.flow = .income; moneyBack.category = .refund
+let countBeforeRefund = incomeStore.entries.count
+_ = incomeStore.ingest(outgo)
+_ = incomeStore.ingest(moneyBack)
+_ = incomeStore.ingest(moneyBack)
+check("原消费与同单号退款各记一次", incomeStore.entries.count == countBeforeRefund + 2)
+check("退款单独标注收入", incomeStore.entries.contains { $0.transactionID == moneyBack.transactionID && $0.kind == .income && $0.category == .refund })
+
+let screenshotCard = """
+微信支付
+-17.28
+当前状态 支付成功
+商户全称 咖啡店
+商品 咖啡
+支付时间 2026-11-15 12:00:00
+支付方式 建设银行储蓄卡(8202)
+交易单号 44444444444444448202
+"""
+let sc = BillParser.parse(screenshotCard).first!
+_ = incomeStore.ingest(sc, trigger: .manual)
+check("手动按键OCR也自动添加银行卡", acct.cards.contains { $0.bankName == "建设银行" && $0.tail == "8202" })
+let screenshotCardCount = acct.cards.count
+_ = incomeStore.ingest(sc, trigger: .manual)
+check("重复按键不会重复添加卡", acct.cards.count == screenshotCardCount)
+_ = acct.upsertCard(bankName: "工商银行", tail: "8202")
+check("不同银行同尾号不合并", acct.cards.filter { $0.tail == "8202" }.count == 2)
+acct.applyBankBalance(45000, tail: "8202", bankName: "工商银行")
+check("同尾号校准不串卡", acct.card(tail: "8202", bankName: "工商银行")?.balanceCents == 45000 && acct.card(tail: "8202", bankName: "建设银行")?.balanceCents == 0)
+check("完整卡号只保存正确末四位", BillParser.extractAccount("招商银行储蓄卡 6214 8300 0012 3456", source: .wechat) == "招商银行(3456)")
+check("掩码卡号不会取前四位", BillParser.extractAccount("招商银行 卡号6214**** 8203", source: .bank) == "招商银行(8203)")
+let duplicateTxn = incomeStore.entries.count
+var timedA = mk(1122, .wechat, "相同商户", .wechatZero, base, false)
+timedA.hasPaidTime = true
+var timedB = timedA; timedB.date = base.addingTimeInterval(10)
+timedA.raw = "交易时间 2026-11-15 12:00:01"
+timedB.raw = "交易时间 2026-11-15 12:00:11"
+_ = incomeStore.ingest(timedA); _ = incomeStore.ingest(timedB)
+check("同店同金额不同真实支付时间保留两笔", incomeStore.entries.count == duplicateTxn + 2)
+
+let categoryStore = CategoryStore.shared
+let custom = categoryStore.add("项目测试收入", kind: .income)!
+check("自定义收入分类可添加", Category.choices(for: .income).contains(custom))
+Category.MerchantMemory.remember("张先生", custom)
+check("收入可沿用用户自定义分类", BillParser.parse(redPacket).first?.category == custom)
+check("同类型分类不可重名", categoryStore.add("项目测试收入", kind: .income) == nil)
+check("旧分类字符串仍兼容解码", (try? JSONDecoder().decode(Category.self, from: Data("\"food\"".utf8))) == .food)
+let categoryJSON = try! JSONEncoder().encode(custom)
+check("自定义分类JSON保留名称", (try? JSONDecoder().decode(Category.self, from: categoryJSON))?.title == "项目测试收入")
+categoryStore.remove(custom)
+check("删除分类同时停止自动沿用", Category.MerchantMemory.category(for: "张先生") == nil)
+check("删除后从新账目选择中移除", !Category.allCases.contains(custom))
+check("删除分类不改变历史名称", custom.title == "项目测试收入")
+categoryStore.merge([custom], deleted: [])
+check("旧备份不复活已删除分类", !categoryStore.categories.contains(custom))
+let oldEntry = try! JSONDecoder().decode(Entry.self, from: JSONSerialization.data(withJSONObject: oldJSON))
+check("旧账目缺收支类型默认支出", oldEntry.kind == .expense)
+let range = DateInterval(start: base.addingTimeInterval(-86400 * 370), end: base.addingTimeInterval(86400 * 370))
+let expenseSum = incomeStore.entries(in: range).filter { $0.kind == .expense }.reduce(0) { $0 + $1.amountCents }
+let incomes = incomeStore.entries(in: range).filter { $0.kind == .income }.reduce(0) { $0 + $1.amountCents }
+check("支出统计不混入收入", incomeStore.summary(in: range).total == expenseSum)
+check("收入统计独立计算", incomeStore.summary(in: range, kind: .income).total == incomes)
+let splitCompanyReceipt = screenshotCard.replacingOccurrences(of: "商户全称 咖啡店", with: "商户全称 示例科技有限公\n司")
+check("历史OCR拆行公司后缀可恢复", BillParser.parse(splitCompanyReceipt).first?.merchant == "示例科技有限公司")
+let legacyCompanyEntry = Entry(amountCents: 1728, date: base, category: .digital,
+    merchant: "示例科技有限公", source: .wechat, raw: splitCompanyReceipt.replacingOccurrences(of: "-17.28\n", with: ""))
+incomeStore.add(legacyCompanyEntry)
+let reloadedIncomeStore = LedgerStore()
+check("旧账目按原始文本恢复公司名", reloadedIncomeStore.entries.first { $0.id == legacyCompanyEntry.id }?.merchant == "示例科技有限公司")
+let partialRefund = screenshotCard.replacingOccurrences(of: "当前状态 支付成功", with: "当前状态 退款成功") + "\n退款金额 2.28\n退款时间 2026-11-15 13:10:20"
+let pr = BillParser.parse(partialRefund).first
+check("部分退款取退款金额而非原消费额", pr?.amountCents == 228 && pr?.kind == .income && pr?.category == .refund)
+var incomplete = mk(1231, .wechat, "某商户", .unknown, base, true)
+incomplete.transactionID = "enrichment0000001"
+_ = incomeStore.ingest(incomplete)
+let beforeEnrichment = incomeStore.entries.count
+var improved = incomplete
+improved.merchant = "某商户有限公司"; improved.account = "杭州银行(8210)"; improved.channel = .bank; improved.needsReview = false
+_ = incomeStore.ingest(improved, trigger: .manual)
+check("相同单号补全信息不重复新增", incomeStore.entries.count == beforeEnrichment && incomeStore.entries.first { $0.transactionID == improved.transactionID }?.merchant == improved.merchant)
+check("判重分支也添加新识别的卡", acct.card(tail: "8210", bankName: "杭州银行") != nil)
+let backedCategory = categoryStore.add("专项报销", kind: .income)!
+let snapshotWithCategory = incomeStore.exportPayload()
+check("自定义分类包含在同步快照", snapshotWithCategory.customCategories?.contains(backedCategory) == true)
+categoryStore.remove(backedCategory)
+_ = incomeStore.mergeRemote(snapshotWithCategory)
+check("同步旧快照不复活已删分类", !categoryStore.categories.contains(backedCategory))
+let beforePrefixMerchants = incomeStore.entries.count
+let prefixMerchantA = mk(4321, .bank, "上海巷鱼餐厅", .bank, base, true)
+let prefixMerchantB = mk(4321, .bank, "上海巷鱼超市", .bank, base, true)
+_ = incomeStore.ingest(prefixMerchantA); _ = incomeStore.ingest(prefixMerchantB)
+check("同银行同金额商户前四字相同不误合并", incomeStore.entries.count == beforePrefixMerchants + 2)
+let midnightEntry = Entry(amountCents: 123, date: range.end, category: .food, merchant: "边界测试", source: .manual)
+incomeStore.add(midnightEntry)
+check("日期区间不重复统计下个周期零点", !incomeStore.entries(in: range).contains { $0.id == midnightEntry.id })
+let beforeBankTimes = incomeStore.entries.count
+var bankTimeA = timedA; bankTimeA.source = .bank; bankTimeA.amountCents = 6789
+var bankTimeB = timedB; bankTimeB.source = .bank; bankTimeB.amountCents = 6789
+_ = incomeStore.ingest(bankTimeA); _ = incomeStore.ingest(bankTimeB)
+check("银行同商户同金额但秒级时间不同保留两笔", incomeStore.entries.count == beforeBankTimes + 2)
+let minuteStart = Calendar.current.dateInterval(of: .minute, for: base)!.start
+var minuteBill = mk(6790, .bank, "同一分钟商户", .bank, minuteStart, false)
+minuteBill.hasPaidTime = true; minuteBill.raw = "交易时间 12:00"
+var secondBill = minuteBill; secondBill.date = minuteStart.addingTimeInterval(30); secondBill.raw = "交易时间 12:00:30"
+let beforeMinuteMerge = incomeStore.entries.count
+_ = incomeStore.ingest(minuteBill); _ = incomeStore.ingest(secondBill)
+check("缺秒的短信与同分钟截图仍合并", incomeStore.entries.count == beforeMinuteMerge + 1)
+check("收款时间不被当作收入金额", BillParser.extractAmount("收款时间2026年11月15日12:30:00") == nil)
+check("支付方式卡尾号不被当作金额", BillParser.extractAmount("支付方式 卡(4926)") == nil)
+check("入账日期不被当作金额", BillParser.extractAmount("招商银行入账于11月15日，金额100元") == 10000)
+check("点号日期不是小数金额", BillParser.extractAmount("2026.11.15") == nil)
+let simpleIncome = BillParser.parse("支付宝\n收款成功\n+20.00\n张先生\n收款时间 2026-11-15 13:30:10").first
+check("简化收款成功页也记为收入", simpleIncome?.kind == .income && simpleIncome?.amountCents == 2000 && simpleIncome?.merchant == "张先生")
 
 print("\n─────────────────────────────")
 print("通过 \(pass) / \(pass + fail)")

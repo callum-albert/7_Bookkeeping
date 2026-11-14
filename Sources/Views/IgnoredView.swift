@@ -30,9 +30,9 @@ struct IgnoredListView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("这些事件被判定为「不产生消费」")
+            Text("这些资金流动暂未计入收支")
                 .font(.system(size: 13, weight: .semibold))
-            Text("提现、充值、还款、转账、收款、退款都不计入消费统计。如果某条其实是你花的钱，点一下「确认是消费」即可补记。")
+            Text("本人账户互转等不计收支。旧版本被忽略的收款和退款，可点击「重新识别入账」记录为收入；确认需要计账的其他事件也可补记。")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -92,7 +92,7 @@ struct IgnoredListView: View {
                     Button {
                         withAnimation { store.restoreIgnored(ev) }
                     } label: {
-                        Label("确认是消费", systemImage: "plus.circle.fill")
+                        Label("重新识别入账", systemImage: "plus.circle.fill")
                             .font(.system(size: 12, weight: .semibold))
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)

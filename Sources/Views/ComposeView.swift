@@ -6,6 +6,12 @@ struct ComposeView: View {
     private var _bookkeeper = State(wrappedValue: AutoBookkeeper.shared)
     private var bookkeeper: AutoBookkeeper { get { _bookkeeper.wrappedValue } nonmutating set { _bookkeeper.wrappedValue = newValue } }
 
+    private var _kind = State(wrappedValue: EntryKind.expense)
+    private var kind: EntryKind { get { _kind.wrappedValue } nonmutating set { _kind.wrappedValue = newValue } }
+    private var _accountID = State(wrappedValue: "")
+    private var accountID: String { get { _accountID.wrappedValue } nonmutating set { _accountID.wrappedValue = newValue } }
+    private var _showCategories = State(wrappedValue: false)
+    private var showCategories: Bool { get { _showCategories.wrappedValue } nonmutating set { _showCategories.wrappedValue = newValue } }
     private var _amountText = State(wrappedValue: "")
     private var amountText: String { get { _amountText.wrappedValue } nonmutating set { _amountText.wrappedValue = newValue } }
     private var _category = State(wrappedValue: Category.food)
@@ -23,7 +29,7 @@ struct ComposeView: View {
 
     private var amountCents: Int {
         let cleaned = amountText.replacingOccurrences(of: ",", with: "")
-        guard let d = Double(cleaned) else { return 0 }
+        guard let d = Double(cleaned), d.isFinite, d > 0, d < 100_000_000 else { return 0 }
         return Int((d * 100).rounded())
     }
 
@@ -31,6 +37,9 @@ struct ComposeView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 18) {
+                    Picker("收支类型", selection: _kind.projectedValue) {
+                        ForEach(EntryKind.allCases) { Text($0.title).tag($0) }
+                    }.pickerStyle(.segmented)
                     amountSection
                     categorySection
                     detailSection
@@ -69,6 +78,12 @@ struct ComposeView: View {
             }
         }
         .onAppear { amountFocused = true }
+        .onChange(of: kind) { _, value in category = value == .income ? .otherIncome : .food }
+        .onChange(of: CategoryStore.shared.categories) { _, categories in
+            if category.isCustom && !categories.contains(category) { category = kind == .income ? .otherIncome : .food }
+        }
+        .sheet(isPresented: _showCategories.projectedValue) { CategoryManageView(initialKind: kind) }
+
     }
 
     // MARK: - 金额
@@ -99,9 +114,13 @@ struct ComposeView: View {
     // MARK: - 分类
     private var categorySection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("分类").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+            HStack {
+                Text("分类").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+                Spacer()
+                Button("自定义分类") { showCategories = true }.font(.system(size: 12))
+            }
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 12) {
-                ForEach(Category.allCases) { c in
+                ForEach(Category.choices(for: kind)) { c in
                     Button {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { category = c }
                     } label: {
@@ -131,6 +150,14 @@ struct ComposeView: View {
     // MARK: - 明细
     private var detailSection: some View {
         VStack(spacing: 0) {
+            Picker("收支账户", selection: _accountID.projectedValue) {
+                Text("不指定账户").tag("")
+                Text("微信零钱").tag("wechat")
+                Text("支付宝余额").tag("alipay")
+                ForEach(Accounts.shared.cards) { Text($0.displayName).tag($0.id.uuidString) }
+            }.padding(16)
+            Text("不指定账户时只记收支，不调整余额").font(.system(size: 10)).foregroundStyle(.secondary).padding(.bottom, 8)
+            Divider().opacity(0.4)
             HStack(spacing: 12) {
                 Image(systemName: "storefront.fill")
                     .font(.system(size: 13)).foregroundStyle(Theme.brand).frame(width: 22)
@@ -179,8 +206,11 @@ struct ComposeView: View {
 
     private func save() {
         guard amountCents > 0 else { return }
+        let card = Accounts.shared.cards.first { $0.id.uuidString == accountID }
+        let channel: PayChannel = accountID == "wechat" ? .wechatZero : (accountID == "alipay" ? .alipayBalance : (card == nil ? .unknown : .bank))
+        let account = card.map { "\($0.bankName)(\($0.tail))" } ?? (accountID == "wechat" ? "零钱" : (accountID == "alipay" ? "余额" : ""))
         bookkeeper.addManual(amountCents: amountCents, category: category,
-                             merchant: merchant, note: note, date: date)
+                             merchant: merchant, note: note, date: date, kind: kind, channel: channel, account: account)
         dismiss()
     }
 }

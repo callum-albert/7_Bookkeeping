@@ -49,27 +49,10 @@ struct RecordFromTextIntent: AppIntent {
     }
 }
 
-// MARK: - 读剪贴板记账
-struct ParseClipboardIntent: AppIntent {
-    static var title: LocalizedStringResource = "从剪贴板自动记账"
-    static var description = IntentDescription("读取剪贴板里的微信/支付宝账单并自动入账")
-    static var openAppWhenRun: Bool = false
-
-    @MainActor
-    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
-        let text = UIPasteboard.general.string ?? ""
-        guard !text.isEmpty else { return .result(value: "0", dialog: "剪贴板是空的") }
-        let entries = AutoBookkeeper.shared.ingest(text, source: "快捷指令·剪贴板", trigger: .manual)
-        guard !entries.isEmpty else { return .result(value: "0", dialog: "剪贴板里没有可识别的账单") }
-        let total = entries.reduce(0) { $0 + $1.amountCents }
-        return .result(value: total.moneyText, dialog: "已记 \(entries.count) 笔，共 \(total.moneyText)")
-    }
-}
-
 // MARK: - 识别截图记账（操作按钮 / 轻点背面 / 锁屏小组件）
 struct RecordFromImageIntent: AppIntent {
     static var title: LocalizedStringResource = "识别截图记账"
-    static var description = IntentDescription("从微信/支付宝付款成功截图中识别金额并自动记账，全程后台完成")
+    static var description = IntentDescription("从微信/支付宝消费、收款、红包或退款截图识别金额和收支类型，在后台记账")
     static var openAppWhenRun: Bool = false
 
     @Parameter(title: "截图", description: "传入「截屏」动作的结果")
@@ -90,7 +73,7 @@ struct RecordFromImageIntent: AppIntent {
                 return .result()
             }
             throw NSError(domain: "SevenBookkeeping", code: 2,
-                          userInfo: [NSLocalizedDescriptionKey: "未识别到可靠的账单金额，请截取完整的支付成功页或账单详情页。"])
+                          userInfo: [NSLocalizedDescriptionKey: "未识别到可靠的金额，请截取完整的付款、收款、红包或退款详情页。"])
         }
         let total = entries.reduce(0) { $0 + $1.amountCents }
         IntentLog.record("截图记账：\(entries.count) 笔，\(total.moneyText)")
@@ -122,20 +105,6 @@ struct RecordFromLatestScreenshotIntent: AppIntent {
     }
 }
 
-/// 关闭支付 App 后读取刚刚截取的账单，不读旧图，不弹权限提示。
-struct RecordRecentScreenshotIntent: AppIntent {
-    static var title: LocalizedStringResource = "自动识别刚截的账单"
-    static var description = IntentDescription("用于微信/支付宝关闭时自动化：仅识别90秒内的新截图，需提前授权相册；仍需先截屏")
-    static var openAppWhenRun = false
-
-    @MainActor
-    func perform() async throws -> some IntentResult {
-        guard let shot = await ScreenshotReader.latestWithMeta(maxAge: 90) else { return .result() }
-        _ = await AutoBookkeeper.shared.ingestImage(shot.image, source: "自动化·新截图")
-        return .result()
-    }
-}
-
 /// 读取相册最新截图（排除普通照片）
 enum ScreenshotReader {
     struct Shot {
@@ -147,10 +116,8 @@ enum ScreenshotReader {
         (await latestWithMeta())?.image
     }
 
-    static func latestWithMeta(maxAge: TimeInterval? = nil) async -> Shot? {
-        let status: PHAuthorizationStatus
-        if maxAge != nil { status = PHPhotoLibrary.authorizationStatus(for: .readWrite) }
-        else { status = await PHPhotoLibrary.requestAuthorization(for: .readWrite) }
+    static func latestWithMeta() async -> Shot? {
+        let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         guard status == .authorized || status == .limited else { return nil }
 
         let opts = PHFetchOptions()
@@ -159,10 +126,7 @@ enum ScreenshotReader {
         opts.predicate = NSPredicate(format: "(mediaSubtype & %d) != 0", PHAssetMediaSubtype.photoScreenshot.rawValue)
         guard let asset = PHAsset.fetchAssets(with: .image, options: opts).firstObject else { return nil }
         let created = asset.creationDate
-        if let maxAge {
-            guard let created, Date().timeIntervalSince(created) >= 0,
-                  Date().timeIntervalSince(created) <= maxAge else { return nil }
-        }
+
 
         return await withCheckedContinuation { cont in
             var resumed = false
@@ -185,7 +149,7 @@ enum ScreenshotReader {
 // MARK: - 一句话记一笔
 struct QuickRecordIntent: AppIntent {
     static var title: LocalizedStringResource = "快速记一笔"
-    static var description = IntentDescription("直接记一笔支出")
+    static var description = IntentDescription("直接记一笔收入或支出，按所选分类确定类型")
     static var openAppWhenRun: Bool = false
 
     @Parameter(title: "金额（元）")
@@ -210,7 +174,7 @@ struct QuickRecordIntent: AppIntent {
             category: Category(rawValue: category.id) ?? .other,
             merchant: merchant,
             note: "",
-            date: Date()
+            date: Date(), kind: (Category(rawValue: category.id) ?? .other).kind
         )
         return .result(dialog: "已记 \(amount.amountCnyText) · \(category.name)")
     }
@@ -232,37 +196,22 @@ struct CategoryEntity: AppEntity {
         DisplayRepresentation(title: "\(name)")
     }
 
-    static var all: [CategoryEntity] {
+    @MainActor static var all: [CategoryEntity] {
         Category.allCases.map { CategoryEntity(id: $0.rawValue, name: $0.title) }
     }
 }
 
 struct CategoryQuery: EntityQuery {
     func entities(for identifiers: [String]) async throws -> [CategoryEntity] {
-        CategoryEntity.all.filter { identifiers.contains($0.id) }
+        await MainActor.run { CategoryEntity.all.filter { identifiers.contains($0.id) } }
     }
-    func suggestedEntities() async throws -> [CategoryEntity] { CategoryEntity.all }
-    func defaultResult() async -> CategoryEntity? { CategoryEntity.all.first }
+    func suggestedEntities() async throws -> [CategoryEntity] { await MainActor.run { CategoryEntity.all } }
+    func defaultResult() async -> CategoryEntity? { await MainActor.run { CategoryEntity.all.first } }
 }
 
 // MARK: - 暴露给「快捷指令」App
 struct BookkeepingShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
-        AppShortcut(
-            intent: RecordRecentScreenshotIntent(),
-            phrases: ["用 \(.applicationName) 识别刚截的账单"],
-            shortTitle: "自动识别刚截的账单",
-            systemImageName: "photo.badge.bolt"
-        )
-        AppShortcut(
-            intent: ParseClipboardIntent(),
-            phrases: [
-                "用 \(.applicationName) 记一笔",
-                "让 \(.applicationName) 记账"
-            ],
-            shortTitle: "剪贴板自动记账",
-            systemImageName: "text.badge.checkmark"
-        )
         AppShortcut(
             intent: RecordFromLatestScreenshotIntent(),
             phrases: ["用 \(.applicationName) 识别最新截图", "让 \(.applicationName) 记这张截图"],
