@@ -36,6 +36,19 @@ struct SettingsView: View {
                 dataCard
                 islandCard
                 aboutCard
+                if let log = IntentLog.last {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                        Text(log)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 6)
+                }
                 Color.clear.frame(height: 90)
             }
             .padding(.horizontal, 18)

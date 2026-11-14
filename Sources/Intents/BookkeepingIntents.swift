@@ -90,9 +90,10 @@ struct RecordFromClipboardImageIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        IntentLog.record("剪贴板图片：开始读取")
-        guard let image = UIPasteboard.general.image else {
-            IntentLog.record("剪贴板图片：剪贴板里没有图片")
+        let pb = UIPasteboard.general
+        IntentLog.record("剪贴板图片：changeCount=\(pb.changeCount), types=\(pb.types.count)")
+        guard let image = pb.image else {
+            IntentLog.record("剪贴板读取被拒或没有图片（后台读取剪贴板需要用户授权，通常拿不到）")
             return .result()
         }
         IntentLog.record("剪贴板图片：\(Int(image.size.width))×\(Int(image.size.height))，OCR 中")
