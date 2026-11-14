@@ -14,6 +14,8 @@ struct SettingsView: View {
     private var accounts: Accounts { _accounts.wrappedValue }
     private var _update = State(wrappedValue: UpdateChecker.shared)
     private var update: UpdateChecker { _update.wrappedValue }
+    private var _notify = State(wrappedValue: NotificationService.shared)
+    private var notify: NotificationService { _notify.wrappedValue }
     private var _showClearAlert = State(wrappedValue: false)
     private var showClearAlert: Bool { get { _showClearAlert.wrappedValue } nonmutating set { _showClearAlert.wrappedValue = newValue } }
     private var _exportURL = State<URL?>(wrappedValue: nil)
@@ -250,6 +252,18 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Toggle(isOn: Binding(
+                get: { notify.enabled },
+                set: { notify.setEnabled($0) }
+            )) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("记账后发通知").font(.system(size: 12))
+                    Text(notify.authorized ? "每次记账推一条锁屏通知" : "需要先在系统设置里允许通知")
+                        .font(.system(size: 9)).foregroundStyle(.secondary)
+                }
+            }
+            .tint(Theme.brand)
+
             HStack(spacing: 8) {
                 NavigationLink {
                     IslandDiagnosticsView()
@@ -367,6 +381,18 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
+            } else if let last = update.lastChecked {
+                Divider().opacity(0.35)
+                HStack {
+                    Text("已是最新版本")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.mint)
+                    Spacer()
+                    Text(last.formatted(date: .omitted, time: .shortened))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
             }
         }
         .glassEffect(.regular, in: .rect(cornerRadius: 22))

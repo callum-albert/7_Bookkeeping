@@ -115,6 +115,15 @@ final class LiveActivityController {
             howText: auto ? "自动记账" : "手动记账"
         )
 
+        // 后台（快捷指令触发）时保活，保证请求能完成
+        var bgTask: UIBackgroundTaskIdentifier = .invalid
+        bgTask = UIApplication.shared.beginBackgroundTask(withName: "LiveActivity") {
+            if bgTask != .invalid { UIApplication.shared.endBackgroundTask(bgTask) }
+        }
+        defer {
+            if bgTask != .invalid { UIApplication.shared.endBackgroundTask(bgTask) }
+        }
+
         do {
             let activity = try Activity.request(
                 attributes: BookkeepingAttributes(entryID: entry.id.uuidString),

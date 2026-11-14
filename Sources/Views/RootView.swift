@@ -30,6 +30,9 @@ struct RootView: View {
             ToastOverlay(toast: bookkeeper.toast)
                 .padding(.top, 4)
         }
+        .task {
+            await NotificationService.shared.requestIfNeeded()
+        }
         .sheet(isPresented: _showCompose.projectedValue) {
             ComposeView()
                 .presentationDetents([.large])

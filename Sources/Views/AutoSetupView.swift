@@ -106,10 +106,16 @@ struct AutoSetupView: View {
                     .font(.system(size: 13, weight: .semibold))
             }
             Text("三条通道任选其一即可，配置一次长期有效。三条都配也可以，同一笔会自动去重。")
-            Text("动作在动作库里搜「7记账」即可看到：从剪贴板自动记账 / 解析账单文本记账。")
-            Text("注意：「信息」是自动化的触发器，在「自动化」标签里选；在新建快捷指令的搜索框里搜不到它。")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("动作在动作库里搜「7记账」即可看到：从剪贴板自动记账 / 解析账单文本记账。")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("注意：「信息」是自动化的触发器，在「自动化」标签里选；在新建快捷指令的搜索框里搜不到它。")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

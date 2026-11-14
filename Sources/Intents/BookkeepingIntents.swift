@@ -22,9 +22,12 @@ struct RecordFromTextIntent: AppIntent {
             return .result(value: "0", dialog: "没有识别到账单信息")
         }
         let total = entries.reduce(0) { $0 + $1.amountCents }
-        let names = entries.prefix(3).map { "\($0.category.title)\($0.amountText)" }.joined(separator: "、")
+        let la = LiveActivityController.shared
+        let island = la.lastResult != nil && la.lastError == nil
+            ? ""
+            : "（灵动岛未显示：\(la.lastError ?? "未知原因")）"
         return .result(value: total.moneyText,
-                       dialog: "已记 \(entries.count) 笔，共 \(total.moneyText)。\(names)")
+                       dialog: "已记 \(entries.count) 笔，共 \(total.moneyText)\(island)")
     }
 }
 

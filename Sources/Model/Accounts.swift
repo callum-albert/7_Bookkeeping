@@ -148,6 +148,7 @@ final class Accounts {
                               balanceCents: legacy, confirmed: true)]
         }
         configured = s.configured
+        normalizeCards()
     }
 
     private func persist() {
@@ -208,16 +209,95 @@ final class Accounts {
     // MARK: - 银行卡管理
     @discardableResult
     func upsertCard(bankName: String, tail: String) -> BankCard {
-        if let i = cards.firstIndex(where: { !tail.isEmpty && $0.tail == tail }) {
-            if cards[i].bankName.isEmpty, !bankName.isEmpty { cards[i].bankName = bankName }
-            persist()
-            return cards[i]
+        let name = bankName.isEmpty ? "银行卡" : bankName
+
+        if !tail.isEmpty {
+            // ① 尾号已存在 → 复用
+            if let i = cards.firstIndex(where: { $0.tail == tail }) {
+                if cards[i].bankName.isEmpty || cards[i].bankName == "银行卡" {
+                    cards[i].bankName = name
+                }
+                persist()
+                return cards[i]
+            }
+            // ② 有一张"未指定尾号"的卡 → 给它补上尾号，绝不新建
+            if let i = cards.firstIndex(where: { $0.tail.isEmpty }) {
+                let old = cards[i]
+                cards[i] = BankCard(id: old.id, bankName: name, tail: tail,
+                                    alias: old.alias, balanceCents: old.balanceCents,
+                                    confirmed: old.confirmed)
+                persist()
+                return cards[i]
+            }
+        } else {
+            // 无尾号：① 已有同名卡
+            if let i = cards.firstIndex(where: { $0.tail.isEmpty && $0.bankName == name }) {
+                persist()
+                return cards[i]
+            }
+            // ② 只有一张"通用银行卡" → 直接改名成这家银行，不新建
+            if let i = cards.firstIndex(where: {
+                $0.tail.isEmpty && ($0.bankName.isEmpty || $0.bankName == "银行卡")
+            }) {
+                cards[i].bankName = name
+                persist()
+                return cards[i]
+            }
+            // ③ 同名但已有尾号（例如先有"招商银行(1234)"，又来一条"招商银行"无尾号短信）
+            if let i = cards.firstIndex(where: { $0.bankName == name }) {
+                persist()
+                return cards[i]
+            }
+            if cards.count == 1 { return cards[0] }
         }
-        let card = BankCard(bankName: bankName, tail: tail, confirmed: false)
+
+        let card = BankCard(bankName: name, tail: tail, confirmed: false)
         cards.append(card)
         configured = true
         persist()
         return card
+    }
+
+    /// 修复历史数据里重复的银行卡（同尾号 / 多张无尾号）
+    func normalizeCards() {
+        guard cards.count > 1 else { return }
+        var changed = false
+
+        // 同尾号去重：保留余额大的
+        var byTail: [String: Int] = [:]
+        for (i, c) in cards.enumerated() where !c.tail.isEmpty {
+            if let j = byTail[c.tail] {
+                if cards[i].balanceCents > cards[j].balanceCents { byTail[c.tail] = i }
+                changed = true
+            } else {
+                byTail[c.tail] = i
+            }
+        }
+        if changed {
+            var keep = Set(byTail.values)
+            keep.formUnion(cards.indices.filter { cards[$0].tail.isEmpty })
+            cards = cards.indices.filter { keep.contains($0) }.map { cards[$0] }
+        }
+
+        // 多张无尾号卡 → 合并成一张
+        let noTail = cards.enumerated().filter { $0.element.tail.isEmpty }
+        if noTail.count > 1 {
+            let total = noTail.reduce(0) { $0 + $1.element.balanceCents }
+            // 优先保留有具体银行名的
+            let best = noTail.max { a, b in
+                (a.element.bankName.isEmpty || a.element.bankName == "银行卡" ? 0 : 1)
+                    < (b.element.bankName.isEmpty || b.element.bankName == "银行卡" ? 0 : 1)
+            }!
+            var merged = best.element
+            merged.balanceCents = total
+            merged.confirmed = noTail.contains { $0.element.confirmed }
+            let dropIDs = Set(noTail.map { $0.element.id }).subtracting([best.element.id])
+            cards.removeAll { dropIDs.contains($0.id) }
+            if let i = cards.firstIndex(where: { $0.id == merged.id }) { cards[i] = merged }
+            changed = true
+        }
+
+        if changed { persist() }
     }
 
     func addCard(bankName: String, tail: String, balanceCents: Int, alias: String = "") {

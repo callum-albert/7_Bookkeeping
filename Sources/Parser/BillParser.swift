@@ -276,7 +276,14 @@ enum BillParser {
 
         for name in bankNames where s.contains(name) { parts.append(name); break }
 
-        if let tail = firstMatch(#"(?:尾号|末四位|卡号\**)(\d{4})"#, in: s, group: 1) {
+        let tailPatterns = [
+            #"(?:尾号|末四位|后四位|最后四位)[^0-9]{0,4}(\d{4})"#,
+            #"卡号[^0-9]{0,6}(\d{4})"#,
+            #"\*{2,}(\d{4})"#,
+            #"账户[^0-9]{0,6}(\d{4})"#,
+            #"(?:储蓄卡|借记卡|信用卡)[^0-9]{0,6}(\d{4})"#
+        ]
+        if let tail = tailPatterns.lazy.compactMap({ firstMatch($0, in: s, group: 1) }).first {
             if let last = parts.last, !last.contains("(") {
                 parts[parts.count - 1] = "\(last)(\(tail))"
             } else {

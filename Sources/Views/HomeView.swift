@@ -549,6 +549,7 @@ struct EntryDetailView: View {
 
     var body: some View {
         NavigationStack {
+            ScrollView {
             VStack(spacing: 18) {
                 VStack(spacing: 8) {
                     CategoryBadge(category: entry.category, size: 56)
@@ -612,8 +613,6 @@ struct EntryDetailView: View {
                     .glassEffect(.regular, in: .rect(cornerRadius: 18))
                 }
 
-                Spacer()
-
                 Button {
                     withAnimation {
                         store.delete(entry)
@@ -630,6 +629,9 @@ struct EntryDetailView: View {
                 .buttonStyle(.plain)
             }
             .padding(18)
+            .padding(.top, 4)
+            }
+            .scrollIndicators(.hidden)
             .background(AppBackground())
             .navigationTitle("账目详情")
             .navigationBarTitleDisplayMode(.inline)
