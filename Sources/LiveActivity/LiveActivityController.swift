@@ -97,8 +97,9 @@ final class LiveActivityController {
             lastError = "系统未允许实时活动：设置 → 7记账 → 实时活动 → 允许"
             return false
         }
-        // Live Activity 只能在 App 前台创建，后台先记下来
-        if UIApplication.shared.applicationState != .active {
+        // Live Activity 只能在 App 前台创建；只有明确处于后台时才延后
+        // （App 刚回前台时状态是 inactive，仍应尝试创建）
+        if UIApplication.shared.applicationState == .background {
             pending = (entry, todayTotal)
             lastResult = "后台记账已记录，回到 App 时补显示灵动岛"
             lastError = nil
@@ -200,9 +201,12 @@ final class LiveActivityController {
     /// App 回到前台时补显示之前后台记账的灵动岛
     func flushPending() {
         guard let p = pending else { return }
-        pending = nil
-        guard UIApplication.shared.applicationState == .active else { return }
-        start(for: p.entry, todayTotal: p.total, auto: false)
+        // 进入前台后稍等一拍，等系统把状态切到 active
+        Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            pending = nil
+            _ = start(for: p.entry, todayTotal: p.total, auto: false)
+        }
     }
 
     func endAll() {
