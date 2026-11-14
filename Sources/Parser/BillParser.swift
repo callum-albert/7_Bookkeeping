@@ -247,8 +247,20 @@ enum BillParser {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
 
+        // 只看「标签后面紧跟的词」判断是不是其它字段（例如 商户·单号）
+        // 不能检查整行——公司名里常有「服务」「科技」等字
+        let bannedAfter = ["单号", "编号", "订单号", "流水号", "号：", "号:"]
+        func isTargetLine(_ line: String) -> Bool {
+            guard let label = labels.first(where: { line.contains($0) }),
+                  let r = line.range(of: label) else { return false }
+            let after = String(line[r.upperBound...])
+                .trimmingCharacters(in: CharacterSet(charactersIn: " :：\t"))
+            return !bannedAfter.contains { after.hasPrefix($0) }
+        }
+
         for (i, line) in lines.enumerated() {
-            guard let label = labels.first(where: { line.contains($0) }) else { continue }
+            guard isTargetLine(line),
+                  let label = labels.first(where: { line.contains($0) }) else { continue }
 
             // a) 同行带值：只取「标签之后」的内容（标签可能在行首或行中）
             if let r = line.range(of: label) {
@@ -279,13 +291,16 @@ enum BillParser {
         // 排除"招商银行储蓄卡(4926)"这类支付方式
         if t.contains("储蓄卡") || t.contains("信用卡") || t.contains("借记卡") { return false }
         if t.contains("银行") && t.contains("(") { return false }
+        // 单号、退款说明、扫码提示等都不是商户名
+        let junk = ["单号", "编号", "订单号", "流水号", "退款", "扫码", "可在支持", "账单服务"]
+        if junk.contains(where: { t.contains($0) }) { return false }
         return true
     }
 
     private static func isFieldLabel(_ t: String) -> Bool {
         let labels = ["支付时间", "交易时间", "付款时间", "当前状态", "支付成功", "商品",
                       "商户全称", "商户名称", "收单机构", "支付方式", "交易单号", "商户单号",
-                      "账单服务", "全部账单", "账单"]
+                      "账单服务", "全部账单", "账单", "单号", "退款", "扫码"]
         return labels.contains { t == $0 || t.hasPrefix($0) }
     }
 

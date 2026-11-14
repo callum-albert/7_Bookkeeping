@@ -341,6 +341,33 @@ check("㉕ 商户值在上方也能取到", ma?.merchant == "上海巷鱼餐饮�
 check("㉖ 分类推断为餐饮", ma?.category == .food, "\(String(describing: ma?.category))")
 check("㉗ 支付方式尾号", ma?.account.contains("4926") == true, ma?.account ?? "nil")
 
+print("\n── 17. 完整账单（含单号、退款说明）──")
+let fullBill = """
+账单
+美团
+稻花驿时尚智选餐厅（黄兴路店）
+-31.68
+当前状态
+支付成功
+2026年11月13日11:43:15
+支付时间
+商品
+美团收银909700219151774435
+上海巷鱼餐饮管理服务有限公司
+商户全称
+北京钱袋宝支付技术有限公司
+收单机构
+支付方式
+招商银行储蓄卡（4926）
+交易单号
+4200003231202611130744450480
+商户单号
+可在支持商户扫码退款
+"""
+let fb = BillParser.parse(fullBill).first
+check("㉘ 商户不取单号/退款说明", fb?.merchant == "上海巷鱼餐饮管理服务有限公司", fb?.merchant ?? "nil")
+check("㉙ 分类为餐饮", fb?.category == .food, "\(String(describing: fb?.category))")
+
 print("\n─────────────────────────────")
 print("通过 \(pass) / \(pass + fail)")
 exit(fail == 0 ? 0 : 1)
