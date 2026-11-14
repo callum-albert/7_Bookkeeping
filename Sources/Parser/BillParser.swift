@@ -70,17 +70,17 @@ enum BillParser {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
 
-        // 必须同时出现「当前状态」和至少两个关键字段，才认为是账单详情页
-        guard lines.contains(where: { $0.hasPrefix("当前状态") }) else { return nil }
-        let keyHits = ["支付时间", "交易时间", "商户全称", "商品", "支付方式"]
-            .filter { k in lines.contains { $0.hasPrefix(k) } }.count
-        guard keyHits >= 2 else { return nil }
+        // 只要出现两个以上账单特征字段，就走模板（微信 / 支付宝账单详情页）
+        let markers = ["当前状态", "商户全称", "商户名称", "商家名称", "支付方式",
+                       "交易单号", "收单机构", "支付时间", "商品"]
+        let markerHits = markers.filter { m in lines.contains { $0.contains(m) } }
+        guard markerHits.count >= 2 else { return nil }
 
-        // 只截取「当前状态」到「商户单号 / 账单服务 / 交易服务」之间的块
+        // 从第一个特征行开始，到「交易服务 / 账单服务」结束
         var block: [String] = []
         var started = false
         for line in lines {
-            if line.hasPrefix("当前状态") { started = true }
+            if !started, markers.contains(where: { line.contains($0) }) { started = true }
             if !started { continue }
             if line.hasPrefix("账单服务") || line.hasPrefix("交易服务") { break }
             block.append(line)
@@ -96,12 +96,18 @@ enum BillParser {
                 continue
             }
             // 值可能在相邻行（OCR 常把标签和值拆开，甚至值在上方）
+            let isTimeField = label.contains("时间")
+            var cands: [String] = []
             for j in [i + 1, i - 1] where j >= 0 && j < block.count {
                 let cand = block[j]
                 if isDetailLabelLine(cand) != nil { continue }
                 if cand.isEmpty || cand.hasPrefix("¥") { continue }
-                fields[label] = cand
-                break
+                // 时间字段的值本身就是日期，不能套用「排除日期」的过滤
+                if !isTimeField, !acceptable(cand, relaxed: true) { continue }
+                cands.append(cand)
+            }
+            if let best = cands.max(by: { score($0) < score($1) }) {
+                fields[label] = best
             }
         }
 
@@ -122,8 +128,27 @@ enum BillParser {
         guard let amount = cents, amount > 0 else { return nil }
 
         let source = detectSource(text) ?? (text.contains("支付宝") ? .alipay : .wechat)
-        let merchant = fields["商户全称"] ?? fields["商户名称"] ?? fields["商家名称"]
-            ?? fields["收款方"] ?? fields["商品"] ?? ""
+        // 来源：优先「商品」的值（可读的门店名），否则用「商户全称」
+        var merchant = ""
+        if let product = fields["商品"], readableProductName(product) {
+            merchant = product
+        }
+        if merchant.isEmpty {
+            merchant = fields["商户名称"] ?? fields["商户全称"]
+                ?? fields["商家名称"] ?? fields["收款方"] ?? ""
+        }
+        // 仍为空：用账单页顶部的门店名（金额下方那行）
+        if merchant.isEmpty {
+            for (i, line) in lines.enumerated() where extractAmount(line) != nil {
+                if i + 1 < lines.count {
+                    let cand = lines[i + 1]
+                    if !cand.isEmpty, cand.count >= 2, isDetailLabelLine(cand) == nil {
+                        merchant = cand
+                    }
+                }
+                break
+            }
+        }
         let paymentText = fields["支付方式"] ?? fields["付款方式"] ?? ""
         let timeText = fields["支付时间"] ?? fields["交易时间"] ?? fields["付款时间"] ?? fields["消费时间"] ?? ""
 
@@ -401,6 +426,22 @@ enum BillParser {
             if let best = valid.max(by: { score($0) < score($1) }) { return best }
         }
         return nil
+    }
+
+    /// 「商品」值是否是可读的门店/商户名
+    /// 像「【POS】_上海互联宝地店_567850」「先乘车后付款」「房租」这类不适合当来源
+    private static func readableProductName(_ raw: String) -> Bool {
+        let t = raw.trimmingCharacters(in: .whitespaces)
+        guard t.count >= 3, t.count <= 30 else { return false }
+        if t.uppercased().contains("POS") { return false }
+        if t.contains("_") { return false }
+        if t.contains("先乘车") || t.contains("后付款") || t.contains("自动续费") { return false }
+        let digits = t.filter { $0.isNumber }.count
+        if digits > t.count / 3 { return false }
+        let generic = ["房租", "电费", "水费", "燃气费", "物业费", "话费", "宽带费",
+                       "商品", "订单", "消费", "收款"]
+        if generic.contains(t) { return false }
+        return true
     }
 
     /// 候选值是否可接受

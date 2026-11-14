@@ -391,7 +391,7 @@ let twoFields2 = """
 支付时间 2026年11月11日12:30:00
 """
 let mf2 = BillParser.parse(twoFields2).first
-check("㉜ 同行格式优先商户全称", mf2?.merchant == "深圳海底捞餐饮管理有限公司", mf2?.merchant ?? "nil")
+check("㉜ 商品可读时用商品名", mf2?.merchant == "海底捞火锅", mf2?.merchant ?? "nil")
 
 print("\n── 19. 新场景：滴滴 / 交通卡 ──")
 let didi = """
@@ -483,6 +483,47 @@ check("㊻ 视觉行：时间正确", Calendar.current.component(.day, from: vl?
       "\(String(describing: vl?.date))")
 check("㊼ 视觉行：支付方式尾号", vl?.account.contains("4926") == true, vl?.account ?? "nil")
 check("㊽ 视觉行：分类餐饮", vl?.category == .food, "\(String(describing: vl?.category))")
+
+print("\n── 22. 房租 / 水电分类 ──")
+let rentBill = """
+微信支付
+-3500.00
+当前状态  支付成功
+支付时间  2026年11月01日 10:00:00
+商品  房租
+商户全称  链家房屋租赁有限公司
+支付方式  招商银行储蓄卡(4926)
+"""
+let rb = BillParser.parse(rentBill).first
+check("㊾ 房租识别", rb?.category == .rent, "\(String(describing: rb?.category))")
+check("㊿ 房租商户", rb?.merchant == "链家房屋租赁有限公司", rb?.merchant ?? "nil")
+
+let utilBill = """
+支付宝
+-268.50
+当前状态  支付成功
+支付时间  2026年11月05日 09:30:00
+商品  电费
+商户全称  国家电网上海市电力公司
+支付方式  余额宝
+"""
+let ub = BillParser.parse(utilBill).first
+check("51 水电识别", ub?.category == .utilities, "\(String(describing: ub?.category))")
+
+// 微信账单缺少「当前状态」也要能走模板
+let wechatNoStatus = """
+微信支付
+-35.00
+星巴克咖啡（上海）有限公司
+支付时间  2026年11月10日 08:05:00
+商户全称  星巴克咖啡（上海）有限公司
+支付方式  招商银行储蓄卡(4926)
+交易单号  4200003227202611094941731436
+"""
+let wb = BillParser.parse(wechatNoStatus).first
+check("52 无「当前状态」也走模板", wb?.merchant == "星巴克咖啡(上海)有限公司", wb?.merchant ?? "nil")
+check("53 分类餐饮", wb?.category == .food, "\(String(describing: wb?.category))")
+check("54 来源不是银行卡", wb?.merchant != "银行卡", wb?.merchant ?? "nil")
 
 print("\n─────────────────────────────")
 print("通过 \(pass) / \(pass + fail)")

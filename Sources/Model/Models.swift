@@ -46,7 +46,7 @@ enum Source: String, Codable, CaseIterable, Identifiable {
 // MARK: - 分类
 enum Category: String, Codable, CaseIterable, Identifiable {
     case food, transport, shopping, entertainment, home, medical
-    case education, digital, social, travel, pet, repayment, other
+    case education, digital, social, travel, pet, repayment, rent, utilities, other
 
     var id: String { rawValue }
 
@@ -64,6 +64,8 @@ enum Category: String, Codable, CaseIterable, Identifiable {
         case .travel: return "旅行"
         case .pet: return "宠物"
         case .repayment: return "还款"
+        case .rent: return "房租"
+        case .utilities: return "水电"
         case .other: return "其他"
         }
     }
@@ -82,6 +84,8 @@ enum Category: String, Codable, CaseIterable, Identifiable {
         case .travel: return "airplane"
         case .pet: return "pawprint.fill"
         case .repayment: return "arrow.triangle.2.circlepath"
+        case .rent: return "key.fill"
+        case .utilities: return "bolt.fill"
         case .other: return "ellipsis.circle.fill"
         }
     }
@@ -100,6 +104,8 @@ enum Category: String, Codable, CaseIterable, Identifiable {
         case .travel: return Color(red: 0.24, green: 0.72, blue: 0.80)
         case .pet: return Color(red: 0.86, green: 0.60, blue: 0.32)
         case .repayment: return Color(red: 0.55, green: 0.50, blue: 0.85)
+        case .rent: return Color(red: 0.45, green: 0.62, blue: 0.88)
+        case .utilities: return Color(red: 0.98, green: 0.72, blue: 0.25)
         case .other: return Color(red: 0.58, green: 0.60, blue: 0.64)
         }
     }
@@ -170,7 +176,10 @@ enum Category: String, Codable, CaseIterable, Identifiable {
                           "服饰", "百货", "小米之家", "苏宁", "盒马", "山姆", "costco", "奥莱"])
         score(.entertainment, ["电影", "影城", "万达", "游戏", "steam", "票务", "大麦", "演唱会",
                                "ktv", "剧本", "密室", "订阅", "视频", "vip", "会员", "网易云", "腾讯视频", "爱奇艺", "b站"])
-        score(.home, ["房租", "物业", "水电", "电费", "水费", "燃气", "天然气", "宽带", "话费", "供暖"])
+        score(.rent, ["房租", "租金", "租房", "押金", "中介费", "自如", "贝壳租房", "公寓租赁"])
+        score(.utilities, ["电费", "水费", "燃气费", "天然气", "供暖费", "水电", "暖气",
+                           "电网", "供水", "供电", "电力", "燃气缴费", "物业费"])
+        score(.home, ["物业", "宽带", "装修", "家具", "家电", "保洁", "维修"])
         score(.medical, ["医院", "药房", "药店", "诊所", "医疗", "体检", "挂号", "口腔", "牙科"])
         score(.education, ["学费", "书店", "当当", "课程", "培训", "教育", "考试", "文具", "得到", "知识"])
         score(.digital, ["apple", "app store", "icloud", "数码", "华为", "苹果", "耳机", "电脑", "手机", "充电"])
