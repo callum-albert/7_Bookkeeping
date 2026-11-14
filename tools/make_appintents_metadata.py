@@ -28,6 +28,13 @@ def file_supported_types(utis):
 # 已注册的 App Intent：intent 类型名 / 显示标题 / 描述 / 参数
 INTENTS = [
     {
+        "identifier": "RecordFromEncodedImageIntent",
+        "title": "用编码截图记账",
+        "description": "接收 Base64 编码的原始截图并由 App 内置 OCR 识别",
+        "parameters": [{"name": "encodedImage", "primitive": 0, "optional": False,
+                         "title": "编码截图", "description": "传入 Base64 编码动作的结果"}],
+    },
+    {
         "identifier": "RecordFromImageIntent",
         "title": "识别截图记账",
         "description": "从传入的账单截图识别金额、商户、商品及支付方式",

@@ -36,12 +36,12 @@ struct ManualSetupView: View {
                 method(
                     badge: "备用", tint: Theme.mint,
                     title: "无法选择截屏结果时",
-                    subtitle: "同样按一下，不经过相册",
-                    needSetup: "3 个动作 · 系统先提取文字，再交给 7记账解析",
+                    subtitle: "原图编码传入 App，同样按一下",
+                    needSetup: "3 个动作 · 仅编码图片，不提取文字",
                     steps: [
-                        "截屏 → 从图像中提取文本 → 7记账 · 解析账单文本记账",
-                        "把「账单文本」参数设为上一步提取的文字",
-                        "绑定操作按钮；识别精度受系统文字提取影响，记完核对金额"
+                        "截屏 → Base64 编码 → 7记账 · 用编码截图记账",
+                        "把「编码截图」参数设为上一步的 Base64 编码结果",
+                        "绑定操作按钮；App 还原原图后使用同一套 OCR 识别"
                     ]
                 )
                 method(
@@ -200,7 +200,7 @@ struct ManualSetupView: View {
     }
 
     private var note: some View {
-        Text("旧的相册或剪贴板快捷指令请改为上方两步，确认「截图」参数连接到截屏结果。识别结果有问题时，可在「我的」查看执行记录。")
+        Text("旧的相册或剪贴板快捷指令请改为上方图片直传步骤；若图片参数无法连接，请用 Base64 图片传递。识别结果有问题时，可在「我的」查看执行记录。")
             .font(.system(size: 10))
             .foregroundStyle(.tertiary)
             .fixedSize(horizontal: false, vertical: true)

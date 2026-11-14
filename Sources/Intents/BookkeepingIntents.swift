@@ -86,6 +86,40 @@ struct RecordFromImageIntent: AppIntent {
     }
 }
 
+/// 当快捷指令编辑器无法把「截屏」结果连接到 IntentFile 时，用字符串传原始图片字节。
+/// 这一步只编码图片，不在快捷指令中做 OCR，也不写入相册。
+struct RecordFromEncodedImageIntent: AppIntent {
+    static var title: LocalizedStringResource = "用编码截图记账"
+    static var description = IntentDescription("接收快捷指令 Base64 编码的截图，恢复图片后用 App 内 OCR 记账")
+    static var openAppWhenRun: Bool = false
+
+    @Parameter(title: "编码截图", description: "传入「Base64 编码」动作的结果")
+    var encodedImage: String
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("识别 \(\.$encodedImage)")
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        let input = encodedImage.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard input.count < 20_000_000,
+              let data = Data(base64Encoded: input, options: .ignoreUnknownCharacters),
+              !data.isEmpty, let image = UIImage(data: data) else {
+            IntentLog.record("编码截图解码失败；检查参数是否接到 Base64 编码结果")
+            throw NSError(domain: "SevenBookkeeping", code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "未收到有效截图；请把编码截图参数设为 Base64 编码结果。"])
+        }
+        IntentLog.record("编码截图已还原：\(data.count) 字节")
+        let entries = await AutoBookkeeper.shared.ingestImage(image, source: "快捷指令·编码截图")
+        if entries.isEmpty && BillParser.parse(AutoBookkeeper.shared.lastOCRText).isEmpty {
+            throw NSError(domain: "SevenBookkeeping", code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "截图中未识别到可靠账单，请打开完整详情页再按按钮。"])
+        }
+        return .result()
+    }
+}
+
 // MARK: - 识别剪贴板里的图片（不需要相册权限）
 struct RecordFromClipboardImageIntent: AppIntent {
     static var title: LocalizedStringResource = "识别剪贴板图片记账"
