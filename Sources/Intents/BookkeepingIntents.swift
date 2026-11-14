@@ -2,6 +2,7 @@ import Foundation
 import AppIntents
 import UIKit
 import Photos
+import UniformTypeIdentifiers
 
 /// 记录 App Intent 的执行结果，便于在 App 内排查「按了按钮却没记上」
 enum IntentLog {
@@ -55,7 +56,7 @@ struct RecordFromImageIntent: AppIntent {
     static var description = IntentDescription("从微信/支付宝消费、收款、红包或退款截图识别金额和收支类型，在后台记账")
     static var openAppWhenRun: Bool = false
 
-    @Parameter(title: "截图", description: "传入「截屏」动作的结果")
+    @Parameter(title: "截图", description: "传入「截屏」动作的结果", supportedContentTypes: [.image])
     var image: IntentFile
 
     @MainActor

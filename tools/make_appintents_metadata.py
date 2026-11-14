@@ -16,6 +16,15 @@ MODULE = "Seven7"
 TOOLS_VERSION = "27A225b"
 FORMAT_VERSION = "3.0"
 
+
+def file_supported_types(utis):
+    """IntentFile 参数必须声明支持的内容类型，否则快捷指令不认图片输入"""
+    return [
+        "LNValueTypeMetadataKeyFileSupportedTypes",
+        {"array": {"elements": [{"string": {"wrapper": u}} for u in utis]}},
+    ]
+
+
 # 已注册的 App Intent：intent 类型名 / 显示标题 / 描述 / 参数
 INTENTS = [
     {
@@ -24,7 +33,8 @@ INTENTS = [
         "description": "从传入的账单截图识别金额、商户、商品及支付方式",
         "parameters": [
             {"name": "image", "intents_type": 12, "optional": False,
-             "title": "截图", "description": "传入截屏动作的结果"}
+             "title": "截图", "description": "传入截屏动作的结果",
+             "type_specific_metadata": file_supported_types(["public.image"])}
         ],
     },
     {
@@ -51,6 +61,7 @@ INTENTS = [
 
 # 参数条目的公共字段（照系统样本）
 def param_entry(p):
+    tsm = p.get("type_specific_metadata", [])
     return {
         "capabilities": 0,
         "dynamicOptionsSupport": 0,
@@ -64,7 +75,7 @@ def param_entry(p):
         },
         "resolvableInputTypes": [],
         "title": {"alternatives": [], "key": p.get("title", p["name"])},
-        "typeSpecificMetadata": [],
+        "typeSpecificMetadata": tsm,
         "valueType": ({"intents": {"wrapper": {"typeIdentifier": p["intents_type"]}}}
                       if "intents_type" in p else
                       {"primitive": {"wrapper": {"typeIdentifier": p["primitive"]}}}),
