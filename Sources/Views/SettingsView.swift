@@ -1,6 +1,5 @@
 import SwiftUI
 import UniformTypeIdentifiers
-import PhotosUI
 
 struct SettingsView: View {
     private var _store = State(wrappedValue: LedgerStore.shared)
@@ -15,10 +14,6 @@ struct SettingsView: View {
     private var accounts: Accounts { _accounts.wrappedValue }
     private var _update = State(wrappedValue: UpdateChecker.shared)
     private var update: UpdateChecker { _update.wrappedValue }
-    private var _logTick = State(wrappedValue: false)
-    private var logTick: Bool { get { _logTick.wrappedValue } nonmutating set { _logTick.wrappedValue = newValue } }
-    private var _testPhoto = State<PhotosPickerItem?>(wrappedValue: nil)
-    private var testPhoto: PhotosPickerItem? { get { _testPhoto.wrappedValue } nonmutating set { _testPhoto.wrappedValue = newValue } }
     private var _notify = State(wrappedValue: NotificationService.shared)
     private var notify: NotificationService { _notify.wrappedValue }
     private var _showClearAlert = State(wrappedValue: false)
@@ -31,8 +26,6 @@ struct SettingsView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                debugCard
-                    .id(logTick)
                 methodsCard
                 balanceCard
                 dataCard
@@ -121,95 +114,6 @@ struct SettingsView: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-    }
-
-    // MARK: - 调试
-    private var debugCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "ladybug.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                Text("最近操作")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text("v\(update.currentVersion)")
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-            }
-
-            let logs = IntentLog.lines
-            VStack(alignment: .leading, spacing: 2) {
-                if logs.isEmpty {
-                    Text("暂无记录 — 快捷指令还没成功调用过 App")
-                        .foregroundStyle(.tertiary)
-                } else {
-                    ForEach(Array(logs.suffix(4).enumerated()), id: \.offset) { _, line in
-                        Text(line)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
-            .font(.system(size: 9, design: .monospaced))
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            HStack(spacing: 8) {
-                PhotosPicker(selection: _testPhoto.projectedValue, matching: .images) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "photo.badge.plus")
-                        Text("选图测试")
-                    }
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 9)
-                    .glassEffect(.regular.tint(Theme.brand.opacity(0.16)).interactive(), in: .rect(cornerRadius: 10))
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    IntentLog.clear()
-                    logTick.toggle()
-                } label: {
-                    Text("清空")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 9).padding(.horizontal, 12)
-                        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 10))
-                }
-                .buttonStyle(.plain)
-            }
-            .onChange(of: testPhoto) { _, item in
-                guard let item else { return }
-                Task { await runImageTest(item) }
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
-    }
-
-    private func runImageTest(_ item: PhotosPickerItem) async {
-        IntentLog.record("选图测试：加载图片…")
-        await refreshLog()
-        guard let data = try? await item.loadTransferable(type: Data.self),
-              let image = UIImage(data: data) else {
-            IntentLog.record("选图测试：图片读取失败")
-            await refreshLog()
-            testPhoto = nil
-            return
-        }
-        IntentLog.record("选图测试：\(Int(image.size.width))×\(Int(image.size.height))，OCR 中")
-        await refreshLog()
-        let entries = await AutoBookkeeper.shared.ingestImage(image, source: "测试")
-        IntentLog.record(entries.isEmpty ? "选图测试：未识别到账单" : "选图测试：成功 \(entries.count) 笔")
-        await refreshLog()
-        testPhoto = nil
-    }
-
-    private func refreshLog() async {
-        await MainActor.run { logTick.toggle() }
     }
 
     // MARK: - 余额
