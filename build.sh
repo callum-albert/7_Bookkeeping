@@ -65,7 +65,7 @@ cat > "$APP/Info.plist" <<PLIST
   <key>CFBundleName</key><string>$APP_NAME</string>
   <key>CFBundleLocalizations</key><array><string>zh-Hans</string><string>zh-Hant</string><string>en</string></array>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.4.2</string>
+  <key>CFBundleShortVersionString</key><string>1.4.3</string>
   <key>CFBundleVersion</key><string>2</string>
   <key>LSRequiresIPhoneOS</key><true/>
   <key>MinimumOSVersion</key><string>$DEPLOY</string>
@@ -128,7 +128,7 @@ cat > "$APP/PlugIns/SevenWidgets.appex/Info.plist" <<PLIST
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>SevenWidgets</string>
   <key>CFBundlePackageType</key><string>XPC!</string>
-  <key>CFBundleShortVersionString</key><string>1.4.2</string>
+  <key>CFBundleShortVersionString</key><string>1.4.3</string>
   <key>CFBundleVersion</key><string>2</string>
   <key>MinimumOSVersion</key><string>$DEPLOY</string>
   <key>LSMinimumSystemVersion</key><string>$DEPLOY</string>

@@ -143,17 +143,8 @@ struct GlassProminentButton: ViewModifier {
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 15)
-            .background(
-                LinearGradient(colors: [tint, tint.opacity(0.78)],
-                               startPoint: .top, endPoint: .bottom),
-                in: .rect(cornerRadius: 20)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 20)
-                    .stroke(.white.opacity(0.35), lineWidth: 1)
-                    .blendMode(.overlay)
-            )
-            .shadow(color: tint.opacity(0.35), radius: 14, y: 8)
+            .glassEffect(.regular.tint(tint.opacity(0.85)).interactive(),
+                         in: .rect(cornerRadius: 20))
     }
 }
 

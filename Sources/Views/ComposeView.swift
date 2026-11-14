@@ -69,9 +69,14 @@ struct ComposeView: View {
             .safeAreaInset(edge: .bottom) {
                 Button { save() } label: {
                     Text("保存这一笔")
-                        .prominentGlassButton(tint: amountCents > 0 ? Theme.brand : Color.gray)
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.glassProminent)
+                .tint(Theme.brand)
+                .controlSize(.large)
+                .opacity(amountCents > 0 ? 1 : 0.55)
                 .disabled(amountCents <= 0)
                 .padding(.horizontal, 18)
                 .padding(.bottom, 10)
