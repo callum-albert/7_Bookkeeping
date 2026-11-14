@@ -12,6 +12,8 @@ struct SettingsView: View {
     private var backup: BackupService { _backup.wrappedValue }
     private var _accounts = State(wrappedValue: Accounts.shared)
     private var accounts: Accounts { _accounts.wrappedValue }
+    private var _update = State(wrappedValue: UpdateChecker.shared)
+    private var update: UpdateChecker { _update.wrappedValue }
     private var _showClearAlert = State(wrappedValue: false)
     private var showClearAlert: Bool { get { _showClearAlert.wrappedValue } nonmutating set { _showClearAlert.wrappedValue = newValue } }
     private var _exportURL = State<URL?>(wrappedValue: nil)
@@ -281,20 +283,92 @@ struct SettingsView: View {
 
     // MARK: - 关于
     private var aboutCard: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "7.circle.fill")
-                .font(.system(size: 24))
-                .foregroundStyle(LinearGradient(colors: [Theme.brand, Theme.brandSoft],
-                                                startPoint: .top, endPoint: .bottom))
-            VStack(alignment: .leading, spacing: 2) {
-                Text("7记账").font(.system(size: 14, weight: .bold, design: .rounded))
-                Text("v1.1.0 · 数据只存在本机与你的 iCloud")
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "7.circle.fill")
+                    .font(.system(size: 24))
+                    .foregroundStyle(LinearGradient(colors: [Theme.brand, Theme.brandSoft],
+                                                    startPoint: .top, endPoint: .bottom))
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("7记账").font(.system(size: 14, weight: .bold, design: .rounded))
+                        Text("v\(update.currentVersion)")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        if update.hasUpdate {
+                            Text("有新版本")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(Theme.mint)
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(Theme.mint.opacity(0.16), in: .capsule)
+                        }
+                    }
+                    Text("数据只存在本机与你的 iCloud")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    Task { await update.check() }
+                } label: {
+                    if update.isChecking {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("检查更新")
+                            .font(.system(size: 11, weight: .semibold))
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .glassEffect(.regular.interactive(), in: .capsule)
+                    }
+                }
+                .buttonStyle(.plain)
             }
-            Spacer()
+            .padding(16)
+
+            if update.hasUpdate, let latest = update.latest {
+                Divider().opacity(0.35)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("v\(latest.version) 可用").font(.system(size: 12, weight: .semibold))
+                        Spacer()
+                        Text("当前 v\(update.currentVersion)")
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    Text("新版本需要用你的证书重新签名安装；快捷指令与自动化不用重配。")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Button {
+                            UIApplication.shared.open(latest.downloadURL)
+                        } label: {
+                            Text("下载安装包")
+                                .font(.system(size: 12, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .glassEffect(.regular.tint(Theme.brand.opacity(0.2)).interactive(), in: .rect(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            UIApplication.shared.open(latest.pageURL)
+                        } label: {
+                            Text("查看说明")
+                                .font(.system(size: 12, weight: .medium))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(16)
+            } else if let err = update.error {
+                Divider().opacity(0.35)
+                Text("检查失败：\(err)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .padding(16)
-        .frame(maxWidth: .infinity)
         .glassEffect(.regular, in: .rect(cornerRadius: 22))
     }
 

@@ -10,6 +10,7 @@ struct SevenBookkeepingApp: App {
         UIView.appearance().tintColor = UIColor(Theme.brand)
         // 提前初始化同步服务，保证记账后自动备份生效
         _ = BackupService.shared
+        UpdateChecker.shared.checkIfNeeded()
     }
 
     var body: some Scene {
