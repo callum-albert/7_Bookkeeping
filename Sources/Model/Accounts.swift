@@ -1,0 +1,311 @@
+import Foundation
+import SwiftUI
+import Observation
+
+// MARK: - 支付渠道
+enum PayChannel: String, Codable, CaseIterable {
+    case wechatZero       // 微信零钱
+    case wechatCard       // 微信绑定的银行卡
+    case alipayBalance    // 支付宝余额
+    case alipayCard       // 支付宝绑定的银行卡
+    case bank             // 直接刷银行卡 / 银行短信
+    case huabei           // 花呗（信贷）
+    case creditCard       // 信用卡（信贷）
+    case unknown
+
+    var title: String {
+        switch self {
+        case .wechatZero: return "零钱"
+        case .wechatCard: return "微信银行卡"
+        case .alipayBalance: return "余额"
+        case .alipayCard: return "支付宝银行卡"
+        case .bank: return "银行卡"
+        case .huabei: return "花呗"
+        case .creditCard: return "信用卡"
+        case .unknown: return "未识别"
+        }
+    }
+
+    var isCredit: Bool { self == .huabei || self == .creditCard }
+
+    /// 是否从三大余额池里扣钱
+    var balanceBucket: BalanceBucket? {
+        switch self {
+        case .wechatZero: return .wechat
+        case .alipayBalance: return .alipay
+        case .wechatCard, .alipayCard, .bank: return .bank
+        case .huabei, .creditCard, .unknown: return nil
+        }
+    }
+}
+
+// MARK: - 余额池
+enum BalanceBucket: String, Codable, CaseIterable, Identifiable {
+    case wechat
+    case alipay
+    case bank
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .wechat: return "微信余额"
+        case .alipay: return "支付宝余额"
+        case .bank: return "银行卡"
+        }
+    }
+
+    var shortTitle: String {
+        switch self {
+        case .wechat: return "微信"
+        case .alipay: return "支付宝"
+        case .bank: return "银行卡"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .wechat: return "message.fill"
+        case .alipay: return "a.circle.fill"
+        case .bank: return "creditcard.fill"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .wechat: return Color(red: 0.13, green: 0.76, blue: 0.36)
+        case .alipay: return Color(red: 0.10, green: 0.47, blue: 0.96)
+        case .bank: return Color(red: 0.42, green: 0.46, blue: 0.58)
+        }
+    }
+}
+
+// MARK: - 单张银行卡
+struct BankCard: Codable, Identifiable, Hashable {
+    var id: UUID = UUID()
+    var bankName: String = ""        // 招商银行
+    var tail: String = ""            // 1234
+    var alias: String = ""           // 工资卡
+    var balanceCents: Int = 0
+    /// 余额是否由用户确认过（自动识别出来的卡为 false，显示"待设置"）
+    var confirmed: Bool = false
+
+    var displayName: String {
+        if !alias.isEmpty { return alias }
+        if bankName.isEmpty {
+            return tail.isEmpty ? "银行卡" : "尾号\(tail)"
+        }
+        return tail.isEmpty ? bankName : "\(bankName)(\(tail))"
+    }
+
+    var shortLabel: String {
+        if !tail.isEmpty { return "尾号\(tail)" }
+        return bankName.isEmpty ? "银行卡" : bankName
+    }
+}
+
+// MARK: - 余额管理（微信 / 支付宝 / 多张银行卡）
+@Observable
+final class Accounts {
+    static let shared = Accounts()
+
+    private(set) var wechat: Int = 0
+    private(set) var alipay: Int = 0
+    private(set) var cards: [BankCard] = []
+
+    /// 是否已由用户设定过（未设定时不显示数字，避免误导）
+    private(set) var configured: Bool = false
+
+    private let fileURL: URL
+
+    private struct Snapshot: Codable {
+        var wechat: Int
+        var alipay: Int
+        var bank: Int?            // 旧版本单一银行卡余额（迁移用）
+        var cards: [BankCard]?
+        var lastBankTail: String?
+        var configured: Bool
+    }
+
+    init() {
+        let dir = LedgerStore.storageDirectory
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        fileURL = dir.appendingPathComponent("accounts.json")
+        load()
+    }
+
+    // MARK: - 持久化
+    private func load() {
+        guard let data = try? Data(contentsOf: fileURL),
+              let s = try? JSONDecoder().decode(Snapshot.self, from: data) else { return }
+        wechat = s.wechat
+        alipay = s.alipay
+        if let cards = s.cards, !cards.isEmpty {
+            self.cards = cards
+        } else if let legacy = s.bank, legacy > 0 {
+            // 老数据迁移：把单一银行卡余额变成一张卡
+            cards = [BankCard(bankName: "银行卡", tail: s.lastBankTail ?? "",
+                              balanceCents: legacy, confirmed: true)]
+        }
+        configured = s.configured
+    }
+
+    private func persist() {
+        let s = Snapshot(wechat: wechat, alipay: alipay, bank: nil,
+                         cards: cards, lastBankTail: cards.first?.tail, configured: configured)
+        if let data = try? JSONEncoder().encode(s) {
+            try? data.write(to: fileURL, options: .atomic)
+        }
+    }
+
+    // MARK: - 查询
+    func balance(_ bucket: BalanceBucket) -> Int {
+        switch bucket {
+        case .wechat: return wechat
+        case .alipay: return alipay
+        case .bank: return bankTotal
+        }
+    }
+
+    var bankTotal: Int { cards.reduce(0) { $0 + $1.balanceCents } }
+    var total: Int { wechat + alipay + bankTotal }
+
+    func card(tail: String) -> BankCard? {
+        guard !tail.isEmpty else { return cards.first }
+        return cards.first { $0.tail == tail }
+    }
+
+    // MARK: - 修改
+    func setBalance(_ cents: Int, for bucket: BalanceBucket) {
+        switch bucket {
+        case .wechat: wechat = max(0, cents)
+        case .alipay: alipay = max(0, cents)
+        case .bank:
+            if cards.isEmpty {
+                cards = [BankCard(bankName: "银行卡", balanceCents: max(0, cents), confirmed: true)]
+            } else {
+                cards[0].balanceCents = max(0, cents)
+                cards[0].confirmed = true
+            }
+        }
+        configured = true
+        persist()
+    }
+
+    func setAll(wechat: Int, alipay: Int, bank: Int) {
+        self.wechat = max(0, wechat)
+        self.alipay = max(0, alipay)
+        if cards.isEmpty {
+            cards = [BankCard(bankName: "银行卡", balanceCents: max(0, bank), confirmed: true)]
+        } else {
+            cards[0].balanceCents = max(0, bank)
+            cards[0].confirmed = true
+        }
+        configured = true
+        persist()
+    }
+
+    // MARK: - 银行卡管理
+    @discardableResult
+    func upsertCard(bankName: String, tail: String) -> BankCard {
+        if let i = cards.firstIndex(where: { !tail.isEmpty && $0.tail == tail }) {
+            if cards[i].bankName.isEmpty, !bankName.isEmpty { cards[i].bankName = bankName }
+            persist()
+            return cards[i]
+        }
+        let card = BankCard(bankName: bankName, tail: tail, confirmed: false)
+        cards.append(card)
+        configured = true
+        persist()
+        return card
+    }
+
+    func addCard(bankName: String, tail: String, balanceCents: Int, alias: String = "") {
+        cards.append(BankCard(bankName: bankName, tail: tail, alias: alias,
+                              balanceCents: max(0, balanceCents), confirmed: true))
+        configured = true
+        persist()
+    }
+
+    func setCardBalance(id: UUID, cents: Int) {
+        guard let i = cards.firstIndex(where: { $0.id == id }) else { return }
+        cards[i].balanceCents = max(0, cents)
+        cards[i].confirmed = true
+        persist()
+    }
+
+    func updateCard(_ card: BankCard) {
+        guard let i = cards.firstIndex(where: { $0.id == card.id }) else { return }
+        cards[i] = card
+        persist()
+    }
+
+    func removeCard(id: UUID) {
+        cards.removeAll { $0.id == id }
+        persist()
+    }
+
+    // MARK: - 记账扣减
+    func charge(_ cents: Int, channel: PayChannel, tail: String = "") {
+        guard let bucket = channel.balanceBucket else { return }
+        switch bucket {
+        case .wechat: wechat = max(0, wechat - cents)
+        case .alipay: alipay = max(0, alipay - cents)
+        case .bank:
+            if let i = indexOfCard(tail: tail) {
+                cards[i].balanceCents = max(0, cards[i].balanceCents - cents)
+            } else if !cards.isEmpty {
+                cards[0].balanceCents = max(0, cards[0].balanceCents - cents)
+            }
+        }
+        persist()
+    }
+
+    func refund(_ cents: Int, channel: PayChannel, tail: String = "") {
+        guard let bucket = channel.balanceBucket else { return }
+        switch bucket {
+        case .wechat: wechat += cents
+        case .alipay: alipay += cents
+        case .bank:
+            if let i = indexOfCard(tail: tail) {
+                cards[i].balanceCents += cents
+            } else if !cards.isEmpty {
+                cards[0].balanceCents += cents
+            }
+        }
+        persist()
+    }
+
+    private func indexOfCard(tail: String) -> Int? {
+        guard !tail.isEmpty else { return cards.isEmpty ? nil : 0 }
+        if let i = cards.firstIndex(where: { $0.tail == tail }) { return i }
+        return cards.isEmpty ? nil : 0
+    }
+
+    /// 银行短信里带「余额」→ 以它为准校准对应那张卡
+    func applyBankBalance(_ cents: Int, tail: String) {
+        if let i = indexOfCard(tail: tail) {
+            cards[i].balanceCents = max(0, cents)
+            cards[i].confirmed = true
+        } else {
+            cards.append(BankCard(bankName: "银行卡", tail: tail,
+                                  balanceCents: max(0, cents), confirmed: true))
+        }
+        configured = true
+        persist()
+    }
+
+    // MARK: - 同步
+    func exportBalances() -> [String: Int] {
+        var d: [String: Int] = ["wechat": wechat, "alipay": alipay, "bank": bankTotal]
+        for c in cards { d["card:\(c.tail)"] = c.balanceCents }
+        return d
+    }
+
+    func importBalances(_ dict: [String: Int]) {
+        if let v = dict["wechat"] { wechat = max(0, v) }
+        if let v = dict["alipay"] { alipay = max(0, v) }
+        configured = true
+        persist()
+    }
+}

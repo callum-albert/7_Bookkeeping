@@ -1,0 +1,10 @@
+# 构建产物
+build/
+*.ipa
+*.ipa.tmp
+
+# 本地 SDK（用 tools/fetch_sdk.sh 获取）
+tools/sdk/
+
+# macOS
+.DS_Store
