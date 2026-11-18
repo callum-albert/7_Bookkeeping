@@ -11,4 +11,6 @@ struct SyncPayload: Codable {
     var balances: [String: Int]
     var customCategories: [Category]? = nil
     var deletedCategories: [String]? = nil
+    var bankCards: [BankCard]? = nil
+    var transfers: [LedgerStore.Transfer]? = nil
 }

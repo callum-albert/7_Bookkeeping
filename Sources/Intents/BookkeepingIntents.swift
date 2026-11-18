@@ -96,7 +96,8 @@ struct RecordFromClipboardImageIntent: AppIntent {
         IntentLog.record("剪贴板图片：changeCount=\(pb.changeCount), types=\(pb.types.count)")
         guard let image = pb.image else {
             IntentLog.record("剪贴板读取被拒或没有图片（后台读取剪贴板需要用户授权，通常拿不到）")
-            return .result()
+            throw NSError(domain: "SevenBookkeeping", code: 6,
+                          userInfo: [NSLocalizedDescriptionKey: "无法读取剪贴板图片，请改用「截屏 → Base64 编码 → 用编码截图记账」。"])
         }
         IntentLog.record("剪贴板图片：\(Int(image.size.width))×\(Int(image.size.height))，OCR 中")
         let entries = await AutoBookkeeper.shared.ingestImage(image, source: "剪贴板图片")
@@ -116,7 +117,8 @@ struct RecordFromLatestScreenshotIntent: AppIntent {
         IntentLog.record("最新截图：开始读取相册")
         guard let shot = await ScreenshotReader.latestWithMeta() else {
             IntentLog.record("最新截图：读不到图片（相册权限被拒或相册为空）")
-            return .result()
+            throw NSError(domain: "SevenBookkeeping", code: 7,
+                          userInfo: [NSLocalizedDescriptionKey: "无法读取最新截图，请解锁并检查相册权限；建议直接传入编码截图。"])
         }
         let image = shot.image
         let age = shot.createdAt.map { "拍摄于 \($0.formatted(date: .omitted, time: .standard))" } ?? "无拍摄时间"
@@ -208,6 +210,10 @@ struct QuickRecordIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        guard amount.isFinite, amount > 0, amount < 100_000_000 else {
+            throw NSError(domain: "SevenBookkeeping", code: 5,
+                          userInfo: [NSLocalizedDescriptionKey: "请输入大于 0 且小于一亿元的金额。"])
+        }
         AutoBookkeeper.shared.addManual(
             amountCents: Int((amount * 100).rounded()),
             category: Category(rawValue: category.id) ?? .other,

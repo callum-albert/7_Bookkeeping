@@ -23,6 +23,70 @@ final class LedgerStore {
     private let fileURL: URL
     private let ignoredURL: URL
     private let deletedURL: URL
+    private let auditURL: URL
+
+    struct Transfer: Codable, Identifiable {
+        var id = UUID()
+        var date = Date()
+        var from: String
+        var to: String
+        var amountCents: Int
+        var feeCents: Int
+        var reference: String
+    }
+    private struct Audit: Codable {
+        var expected: [String: Int]
+        var transfers: [Transfer]
+    }
+    private var expectedBalances: [String: Int] = [:]
+    private(set) var transfers: [Transfer] = []
+    private(set) var balanceWarnings: [String] = []
+
+    /// 首次升级以现有余额建立基准，不推测历史期初余额。
+    func checkBalances() {
+        let actual = Accounts.shared.auditBalances
+        var warnings: [String] = []
+        for (id, value) in actual.sorted(by: { $0.key < $1.key }) {
+            if let expected = expectedBalances[id], expected != value {
+                warnings.append("\(Accounts.shared.accountTitle(id))：账单推算 \(expected.moneyText)，当前 \(value.moneyText)，差额 \((value - expected).moneyText)")
+            }
+            if value < 0 { warnings.append("\(Accounts.shared.accountTitle(id))余额为负，请检查期初余额、漏记或重复账单") }
+            if expectedBalances[id] == nil { expectedBalances[id] = value }
+        }
+        balanceWarnings = warnings
+        persistAudit()
+    }
+
+    /// 用户核对真实余额后显式建立新基准，不自动掩盖差异。
+    func confirmBalanceBaseline() {
+        expectedBalances = Accounts.shared.auditBalances
+        checkBalances()
+        onDataChanged?()
+    }
+
+    private func persistAudit() {
+        if let data = try? JSONEncoder().encode(Audit(expected: expectedBalances, transfers: transfers)) {
+            try? data.write(to: auditURL, options: .atomic)
+        }
+    }
+
+    @discardableResult
+    func transfer(from: String, to: String, cents: Int, fee: Int = 0, reference: String = "") -> Bool {
+        let balances = Accounts.shared.auditBalances
+        guard from != to, cents > 0, cents < 10_000_000_000, fee >= 0, fee < 10_000_000_000,
+              balances[from] != nil, balances[to] != nil else { return false }
+        if !reference.isEmpty, transfers.contains(where: { $0.reference == reference }) { return false }
+        checkBalances()
+        Accounts.shared.adjust(-cents - fee, accountID: from)
+        Accounts.shared.adjust(cents, accountID: to)
+        expectedBalances[from, default: balances[from]!] -= cents + fee
+        expectedBalances[to, default: balances[to]!] += cents
+        transfers.insert(Transfer(from: from, to: to, amountCents: cents, feeCents: fee, reference: reference), at: 0)
+        persistAudit()
+        checkBalances()
+        onDataChanged?()
+        return true
+    }
 
     var lastAdded: Entry?
 
@@ -62,7 +126,14 @@ final class LedgerStore {
         fileURL = dir.appendingPathComponent("ledger.json")
         ignoredURL = dir.appendingPathComponent("ignored.json")
         deletedURL = dir.appendingPathComponent("deleted.json")
+        auditURL = dir.appendingPathComponent("balance-audit.json")
         load()
+        if let data = try? Data(contentsOf: auditURL), let audit = try? JSONDecoder().decode(Audit.self, from: data) {
+            expectedBalances = audit.expected
+            transfers = audit.transfers
+        } else {
+            expectedBalances = Accounts.shared.auditBalances
+        }
         var repaired = false
         for index in entries.indices {
             let old = entries[index].merchant
@@ -79,6 +150,7 @@ final class LedgerStore {
         }
         if repaired { persist() }
         for entry in entries { registerCard(account: entry.account, channel: entry.channel) }
+        checkBalances()
     }
 
     // MARK: - 持久化
@@ -114,7 +186,21 @@ final class LedgerStore {
     func ingest(_ p: BillParser.Parsed, trigger: Trigger = .automatic) -> Outcome {
         // 1) 非消费，直接忽略并留档
         if p.flow == .transfer {
-            let reason = p.flow == .transfer ? "转账 / 提现 / 还款" : "收款 / 退款"
+            // 只有两端和金额明确的免费提现/充值才自动处理，其他保留给用户指定账户。
+            let withdrawal = ["零钱提现", "余额提现"].contains { p.raw.contains($0) }
+            let recharge = ["零钱充值", "余额充值"].contains { p.raw.contains($0) }
+            let wallet = p.source == .wechat ? "wechat" : (p.source == .alipay ? "alipay" : "")
+            let bankID = Accounts.shared.accountID(channel: .bank, account: p.account)
+            if (withdrawal || recharge), !wallet.isEmpty, !bankTail(of: p.account).isEmpty, let bankID,
+               !p.raw.contains("手续费"), !p.transactionID.isEmpty {
+                let reference = "\(p.source.rawValue):\(p.transactionID)"
+                if transfers.contains(where: { $0.reference == reference }) { return .ignored("已处理的本人账户转账，不重复调整余额") }
+                if transfer(from: withdrawal ? wallet : bankID, to: withdrawal ? bankID : wallet,
+                            cents: p.amountCents, reference: reference) {
+                    return .ignored("本人账户转账已调整两端余额，不计入收支")
+                }
+            }
+            let reason = "资金流动待核对：请在余额页指定转出和转入账户"
             recordIgnored(p, reason: reason)
             return .ignored(reason)
         }
@@ -128,9 +214,6 @@ final class LedgerStore {
             merge(&updated, with: p)
             guard updated != same else { return .duplicate(same) }
             update(updated)
-            if updated.channel != same.channel || updated.account != same.account {
-                applyBalance(same, undo: true); applyBalance(updated)
-            }
             return .merged(updated)
         }
         //    自动触发 5 分钟；手动触发 30 分钟（人按按钮可能晚一点）
@@ -160,13 +243,8 @@ final class LedgerStore {
             let bringsNewInfo = !isVague(p) || !p.account.isEmpty || p.channel != .unknown
             if isVague(same), bringsNewInfo {
                 var e = same
-                let oldEntry = e
                 merge(&e, with: p)
                 update(e)
-                if oldEntry.channel != e.channel || oldEntry.account != e.account {
-                    applyBalance(oldEntry, undo: true)
-                    applyBalance(e)
-                }
                 return .merged(e)
             }
             return .duplicate(same)
@@ -184,18 +262,13 @@ final class LedgerStore {
         // 5) 跨渠道合并：微信/支付宝 ↔ 银行短信/手机银行 ↔ 手动按键
         if let existing = candidates.first(where: { canMerge($0, p) }) {
             var e = existing
-            let oldEntry = e
             merge(&e, with: p)
             update(e)
 
-            // 渠道变了 → 把余额从旧资金池挪到新资金池
-            if oldEntry.channel != e.channel || oldEntry.account != e.account {
-                applyBalance(oldEntry, undo: true)
-                applyBalance(e)
-            }
             // 短信里带余额 → 以余额为准校准
             if let bal = p.balanceAfter, e.channel.balanceBucket == .bank {
                 Accounts.shared.applyBankBalance(bal, tail: bankTail(of: e.account), bankName: bankName(of: e.account))
+                checkBalances()
             }
             return .merged(e)
         }
@@ -218,9 +291,9 @@ final class LedgerStore {
         add(entry)
 
         let tail = bankTail(of: entry.account)
-        applyBalance(entry)
         if let bal = p.balanceAfter, entry.channel.balanceBucket == .bank {
             Accounts.shared.applyBankBalance(bal, tail: tail, bankName: bankName(of: entry.account))
+            checkBalances()
         }
         return .inserted(entry)
     }
@@ -331,12 +404,19 @@ final class LedgerStore {
     }
 
     private func applyBalance(_ entry: Entry, undo: Bool = false) {
+        let accounts = Accounts.shared
+        if let id = accounts.accountID(channel: entry.channel, account: entry.account) {
+            if expectedBalances[id] == nil { expectedBalances[id] = accounts.auditBalances[id] }
+            let delta = (entry.kind == .income ? entry.amountCents : -entry.amountCents) * (undo ? -1 : 1)
+            expectedBalances[id, default: 0] += delta
+        }
         let name = bankName(of: entry.account), tail = bankTail(of: entry.account)
         if (entry.kind == .income) != undo {
             Accounts.shared.refund(entry.amountCents, channel: entry.channel, tail: tail, bankName: name)
         } else {
             Accounts.shared.charge(entry.amountCents, channel: entry.channel, tail: tail, bankName: name)
         }
+        checkBalances()
     }
 
     private func bankTail(of account: String) -> String {
@@ -362,6 +442,7 @@ final class LedgerStore {
     }
 
     private func recordIgnored(_ p: BillParser.Parsed, reason: String) {
+        guard !ignored.contains(where: { $0.text == p.raw && $0.amountCents == p.amountCents }) else { return }
         let ev = IgnoredEvent(date: p.date, reason: reason, text: p.raw,
                               amountCents: p.amountCents, source: p.source)
         ignored.insert(ev, at: 0)
@@ -397,6 +478,8 @@ final class LedgerStore {
     func add(_ entry: Entry) {
         var e = entry
         e.updatedAt = Date()
+        registerCard(account: e.account, channel: e.channel)
+        applyBalance(e)
         entries.append(e)
         lastAdded = e
         persist()
@@ -407,12 +490,19 @@ final class LedgerStore {
         guard let i = entries.firstIndex(where: { $0.id == entry.id }) else { return }
         var e = entry
         e.updatedAt = Date()
+        let old = entries[i]
+        if old.amountCents != e.amountCents || old.kind != e.kind || old.channel != e.channel || old.account != e.account {
+            applyBalance(old, undo: true)
+            registerCard(account: e.account, channel: e.channel)
+            applyBalance(e)
+        }
         entries[i] = e
         persist()
         onDataChanged?()
     }
 
     func delete(_ entry: Entry) {
+        guard let entry = entries.first(where: { $0.id == entry.id }) else { return }
         entries.removeAll { $0.id == entry.id }
         if !deletedIDs.contains(entry.id) { deletedIDs.append(entry.id) }
         if deletedIDs.count > 500 { deletedIDs = Array(deletedIDs.suffix(500)) }
@@ -422,9 +512,14 @@ final class LedgerStore {
     }
 
     func deleteAll() {
+        for entry in entries {
+            applyBalance(entry, undo: true)
+            if !deletedIDs.contains(entry.id) { deletedIDs.append(entry.id) }
+        }
         entries.removeAll()
         ignored.removeAll()
         persist()
+        onDataChanged?()
     }
 
     // MARK: - 跨设备同步
@@ -444,7 +539,8 @@ final class LedgerStore {
             ignored: Array(ignored.prefix(200)),
             deletedIDs: deletedIDs,
             balances: Accounts.shared.exportBalances(),
-            customCategories: CategoryStore.shared.categories, deletedCategories: CategoryStore.shared.deleted
+            customCategories: CategoryStore.shared.categories, deletedCategories: CategoryStore.shared.deleted,
+            bankCards: Accounts.shared.cards, transfers: transfers
         )
     }
 
@@ -452,6 +548,10 @@ final class LedgerStore {
     @discardableResult
     func mergeRemote(_ payload: SyncPayload) -> (added: Int, updated: Int, removed: Int) {
         CategoryStore.shared.merge(payload.customCategories ?? [], deleted: payload.deletedCategories ?? [])
+        let transferIDs = Set(transfers.map(\.id))
+        transfers.append(contentsOf: (payload.transfers ?? []).filter { !transferIDs.contains($0.id) })
+        transfers.sort { $0.date > $1.date }
+        persistAudit()
         var tomb = Set(deletedIDs)
         for id in payload.deletedIDs { tomb.insert(id) }
         deletedIDs = Array(tomb)
@@ -491,6 +591,8 @@ final class LedgerStore {
         return (added, updated, removed)
     }
 
+
+    var pendingReview: [Entry] { entries.filter(\.needsReview).sorted { $0.date > $1.date } }
 
     // MARK: - 统计
     struct Summary {

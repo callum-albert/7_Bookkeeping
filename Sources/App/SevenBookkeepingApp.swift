@@ -16,8 +16,15 @@ struct SevenBookkeepingApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .task {
+                    while !Task.isCancelled {
+                        LedgerStore.shared.checkBalances()
+                        do { try await Task.sleep(for: .seconds(60)) } catch { break }
+                    }
+                }
                 .onChange(of: scenePhase) { _, newPhase in
                     if newPhase == .active {
+                        LedgerStore.shared.checkBalances()
                         LiveActivityController.shared.flushPending()
                         BackupService.shared.pullIfNeeded()
                     } else if newPhase == .background {
@@ -43,7 +50,8 @@ struct SevenBookkeepingApp: App {
             _ = AutoBookkeeper.shared.ingest(text, source: "URL")
             return
         }
-        if let amountStr = value("amount"), let amount = Double(amountStr) {
+        if let amountStr = value("amount"), let amount = Double(amountStr),
+           amount.isFinite, amount > 0, amount < 100_000_000 {
             AutoBookkeeper.shared.addManual(
                 amountCents: Int((amount * 100).rounded()),
                 category: Category(rawValue: value("category") ?? "") ?? .other,

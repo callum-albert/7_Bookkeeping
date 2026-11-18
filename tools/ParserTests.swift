@@ -714,7 +714,7 @@ check("重复按键不会重复添加卡", acct.cards.count == screenshotCardCou
 _ = acct.upsertCard(bankName: "工商银行", tail: "8202")
 check("不同银行同尾号不合并", acct.cards.filter { $0.tail == "8202" }.count == 2)
 acct.applyBankBalance(45000, tail: "8202", bankName: "工商银行")
-check("同尾号校准不串卡", acct.card(tail: "8202", bankName: "工商银行")?.balanceCents == 45000 && acct.card(tail: "8202", bankName: "建设银行")?.balanceCents == 0)
+check("同尾号校准不串卡", acct.card(tail: "8202", bankName: "工商银行")?.balanceCents == 45000 && acct.card(tail: "8202", bankName: "建设银行")?.balanceCents == -1728)
 check("完整卡号只保存正确末四位", BillParser.extractAccount("招商银行储蓄卡 6214 8300 0012 3456", source: .wechat) == "招商银行(3456)")
 check("掩码卡号不会取前四位", BillParser.extractAccount("招商银行 卡号6214**** 8203", source: .bank) == "招商银行(8203)")
 let duplicateTxn = incomeStore.entries.count
@@ -799,6 +799,60 @@ check("入账日期不被当作金额", BillParser.extractAmount("招商银行�
 check("点号日期不是小数金额", BillParser.extractAmount("2026.11.15") == nil)
 let simpleIncome = BillParser.parse("支付宝\n收款成功\n+20.00\n张先生\n收款时间 2026-11-15 13:30:10").first
 check("简化收款成功页也记为收入", simpleIncome?.kind == .income && simpleIncome?.amountCents == 2000 && simpleIncome?.merchant == "张先生")
+
+// 余额回归：统一 CRUD、负数可逆、转账守恒和持久化基准。
+let auditStore = LedgerStore()
+acct.setAll(wechat: 10000, alipay: 20000, bank: acct.cards.first?.balanceCents ?? 0)
+for card in acct.cards where card.balanceCents < 0 { acct.setCardBalance(id: card.id, cents: 0) }
+auditStore.confirmBalanceBaseline()
+let beforeTransferTotal = acct.total
+check("本人转账成功", auditStore.transfer(from: "wechat", to: "alipay", cents: 3000, fee: 10, reference: "test-transfer"))
+check("转账两端余额及手续费", acct.wechat == 6990 && acct.alipay == 23000 && acct.total == beforeTransferTotal - 10)
+check("转账不计入收支", !auditStore.entries.contains { $0.transactionID == "test-transfer" })
+check("重复转账不重复扣款", !auditStore.transfer(from: "wechat", to: "alipay", cents: 3000, reference: "test-transfer") && acct.wechat == 6990)
+check("拒绝同账户转账", !auditStore.transfer(from: "wechat", to: "wechat", cents: 100))
+check("拒绝不存在账户", !auditStore.transfer(from: "wechat", to: "missing", cents: 100))
+check("转账后核对无差异", auditStore.balanceWarnings.isEmpty)
+var editable = Entry(amountCents: 8000, date: Date(), category: .food, merchant: "余额回归", source: .manual, needsReview: true, channel: .wechatZero)
+auditStore.add(editable)
+check("扣款不截零掩盖负余额", acct.wechat == -1010 && !auditStore.balanceWarnings.isEmpty)
+editable.amountCents = 1000
+editable.channel = .alipayBalance
+auditStore.update(editable)
+check("修改金额及账户正确还原旧余额", acct.wechat == 6990 && acct.alipay == 22000)
+check("待确认查询包含旧日期账目", auditStore.pendingReview.contains { $0.id == editable.id })
+editable.needsReview = false
+auditStore.update(editable)
+check("显式确认同步移除提醒", !auditStore.pendingReview.contains { $0.id == editable.id })
+auditStore.delete(editable)
+auditStore.delete(editable)
+check("重复删除不会多退余额", acct.wechat == 6990 && acct.alipay == 23000)
+acct.setBalance(9999, for: .wechat)
+auditStore.checkBalances()
+check("手动余额差异保留待确认", auditStore.balanceWarnings.contains { $0.contains("差额") })
+let auditReload = LedgerStore()
+check("冷启动恢复转账及差异基准", auditReload.transfers.contains { $0.reference == "test-transfer" } && !auditReload.balanceWarnings.isEmpty)
+auditReload.confirmBalanceBaseline()
+check("核对后新基准清除差异", auditReload.balanceWarnings.isEmpty)
+
+var withdrawal = mk(500, .wechat, "零钱提现", .wechatZero, Date(), false)
+withdrawal.flow = .transfer
+withdrawal.raw = "微信零钱提现 招商银行(8201) 到账金额5.00元"
+withdrawal.account = "招商银行(8201)"
+withdrawal.transactionID = "withdrawal-regression"
+let walletBeforeWithdrawal = acct.wechat
+let cardBeforeWithdrawal = acct.card(tail: "8201", bankName: "招商银行")!.balanceCents
+_ = auditReload.ingest(withdrawal)
+check("明确提现自动调整两端", acct.wechat == walletBeforeWithdrawal - 500 && acct.card(tail: "8201", bankName: "招商银行")?.balanceCents == cardBeforeWithdrawal + 500)
+_ = auditReload.ingest(withdrawal)
+check("重复提现不重复调整余额", acct.wechat == walletBeforeWithdrawal - 500)
+withdrawal.transactionID = "withdrawal-fee-regression"
+withdrawal.raw += " 手续费0.10元"
+let unresolvedCount = auditReload.ignored.count
+_ = auditReload.ingest(withdrawal)
+check("手续费不明确转待核对不猜金额", acct.wechat == walletBeforeWithdrawal - 500 && auditReload.ignored.count == unresolvedCount + 1)
+_ = auditReload.ingest(withdrawal)
+check("重复未处理资金流动去重", auditReload.ignored.count == unresolvedCount + 1)
 
 print("\n─────────────────────────────")
 print("通过 \(pass) / \(pass + fail)")

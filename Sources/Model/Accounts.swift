@@ -333,11 +333,11 @@ final class Accounts {
     func charge(_ cents: Int, channel: PayChannel, tail: String = "", bankName: String = "") {
         guard let bucket = channel.balanceBucket else { return }
         switch bucket {
-        case .wechat: wechat = max(0, wechat - cents)
-        case .alipay: alipay = max(0, alipay - cents)
+        case .wechat: wechat -= cents
+        case .alipay: alipay -= cents
         case .bank:
             if let i = indexOfCard(tail: tail, bankName: bankName) {
-                cards[i].balanceCents = max(0, cards[i].balanceCents - cents)
+                cards[i].balanceCents -= cents
             }
         }
         persist()
@@ -381,11 +381,52 @@ final class Accounts {
         persist()
     }
 
+    /// 使用稳定卡 ID，避免相同尾号的不同银行互相覆盖。
+    var auditBalances: [String: Int] {
+        var result = ["wechat": wechat, "alipay": alipay]
+        for card in cards { result[card.id.uuidString] = card.balanceCents }
+        return result
+    }
+
+    func accountID(channel: PayChannel, account: String) -> String? {
+        switch channel.balanceBucket {
+        case .wechat: return "wechat"
+        case .alipay: return "alipay"
+        case .bank:
+            let name = BillParser.bankNames.first { account.contains($0) } ?? ""
+            let tail = account.range(of: #"\(\d{4}\)"#, options: .regularExpression)
+                .map { String(account[$0]).trimmingCharacters(in: CharacterSet(charactersIn: "()")) } ?? ""
+            return card(tail: tail, bankName: name)?.id.uuidString
+        case nil: return nil
+        }
+    }
+
+    func adjust(_ cents: Int, accountID: String) {
+        if accountID == "wechat" { wechat += cents }
+        else if accountID == "alipay" { alipay += cents }
+        else if let i = cards.firstIndex(where: { $0.id.uuidString == accountID }) {
+            cards[i].balanceCents += cents
+        }
+        persist()
+    }
+
+    func accountTitle(_ id: String) -> String {
+        if id == "wechat" { return "微信余额" }
+        if id == "alipay" { return "支付宝余额" }
+        return cards.first { $0.id.uuidString == id }?.displayName ?? "已删除账户"
+    }
+
     // MARK: - 同步
     func exportBalances() -> [String: Int] {
         var d: [String: Int] = ["wechat": wechat, "alipay": alipay, "bank": bankTotal]
         for c in cards { d["card:\(c.tail)"] = c.balanceCents }
         return d
+    }
+
+    func restoreCards(_ restored: [BankCard]) {
+        cards = restored
+        configured = true
+        persist()
     }
 
     func importBalances(_ dict: [String: Int]) {

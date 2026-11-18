@@ -10,6 +10,10 @@ struct IgnoredListView: View {
         ScrollView {
             VStack(spacing: 14) {
                 header
+                NavigationLink("本人账户互转：指定两端并调整余额") { TransferView() }
+                    .font(.subheadline)
+                Text("完成转账后请忽略对应待核对事件，避免再次处理。不要把本人互转重新识别为消费。")
+                    .font(.subheadline).foregroundStyle(.secondary)
 
                 if store.ignored.isEmpty {
                     empty

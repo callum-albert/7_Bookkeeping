@@ -13,8 +13,6 @@ struct HomeView: View {
     private var photoItem: PhotosPickerItem? { get { _photoItem.wrappedValue } nonmutating set { _photoItem.wrappedValue = newValue } }
     private var _showPasteSheet = State(wrappedValue: false)
     private var _showReviewSheet = State(wrappedValue: false)
-    private var _selectedReview = State<Entry?>(wrappedValue: nil)
-    private var selectedReview: Entry? { get { _selectedReview.wrappedValue } nonmutating set { _selectedReview.wrappedValue = newValue } }
     private var showReviewSheet: Bool { get { _showReviewSheet.wrappedValue } nonmutating set { _showReviewSheet.wrappedValue = newValue } }
     private var showPasteSheet: Bool { get { _showPasteSheet.wrappedValue } nonmutating set { _showPasteSheet.wrappedValue = newValue } }
     private var _pasteText = State(wrappedValue: "")
@@ -29,7 +27,7 @@ struct HomeView: View {
     }
 
     private var pendingReview: [Entry] {
-        store.entries.filter { $0.needsReview }.sorted { $0.date > $1.date }
+        store.pendingReview
     }
 
     private var reviewBanner: some View {
@@ -84,10 +82,19 @@ struct HomeView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 18) {
+                LazyVStack(spacing: 18) {
                     header
                     heroCard
                     BalanceCard()
+                    if !store.balanceWarnings.isEmpty {
+                        NavigationLink { BalanceAuditView() } label: {
+                            Label("余额有 \(store.balanceWarnings.count) 项需要核对", systemImage: "exclamationmark.triangle")
+                                .font(.subheadline)
+                        }
+                    }
+                    if !store.ignored.isEmpty {
+                        NavigationLink("\(store.ignored.count) 条资金流动待核对") { IgnoredListView() }
+                    }
                     if !pendingReview.isEmpty { reviewBanner }
                     quickActions
                     listSection
@@ -117,7 +124,7 @@ struct HomeView: View {
             }
         }
         .sheet(isPresented: _showPasteSheet.projectedValue) { pasteSheet }
-        .sheet(isPresented: _showReviewSheet.projectedValue) { reviewSheet }
+        .sheet(isPresented: _showReviewSheet.projectedValue) { ReviewListView() }
     }
 
     // MARK: - 头部
@@ -263,7 +270,7 @@ struct HomeView: View {
 
     // MARK: - 账目列表
     private var listSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        LazyVStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text("最近账目")
                     .font(.system(size: 15, weight: .semibold))
@@ -356,45 +363,6 @@ struct HomeView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 30)
         .glassEffect(.regular, in: .rect(cornerRadius: 26))
-    }
-
-    // MARK: - 待确认复核
-    private var reviewSheet: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 10) {
-                    ForEach(pendingReview) { entry in
-                        Button {
-                            selectedReview = entry
-                        } label: {
-                            EntryRow(entry: entry)
-                                .glassEffect(.regular, in: .rect(cornerRadius: 20))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    if pendingReview.isEmpty {
-                        Text("没有待确认的账目")
-                            .foregroundStyle(.secondary)
-                            .padding(24)
-                    }
-                }
-                .padding(18)
-            }
-            .background(AppBackground())
-            .navigationTitle("待确认的账目")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("关闭") { showReviewSheet = false }
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-        .sheet(item: Binding(get: { selectedReview }, set: { selectedReview = $0 })) { e in
-            EntryDetailView(entry: e)
-                .presentationDetents([.medium, .large])
-                .presentationBackground(.thinMaterial)
-        }
     }
 
     // MARK: - 粘贴识别
@@ -529,7 +497,7 @@ struct EntryRow: View {
         }
         .sheet(isPresented: _showDetail.projectedValue) {
             EntryDetailView(entry: entry)
-                .presentationDetents([.medium])
+                .presentationDetents([.large])
                 .presentationBackground(.thinMaterial)
         }
     }
@@ -576,7 +544,6 @@ struct EntryDetailView: View {
                         ForEach(Category.choices(for: entry.kind)) { c in
                             Button {
                                 entry.category = c
-                                entry.needsReview = false
                                 Category.MerchantMemory.remember(entry.merchant, c)
                                 store.update(entry)
                             } label: {
@@ -591,8 +558,18 @@ struct EntryDetailView: View {
 
                     Divider().padding(.leading, 16)
 
-                    // 支付方式
-                    detailRow("支付方式", paymentLabel, symbol: "creditcard.fill")
+                    // 用户可纠正资金账户，统一由账本撤回旧余额并应用新余额。
+                    Menu {
+                        Button("微信余额") { changeAccount(.wechatZero, "零钱") }
+                        Button("支付宝余额") { changeAccount(.alipayBalance, "余额") }
+                        ForEach(Accounts.shared.cards) { card in
+                            Button(card.displayName) { changeAccount(.bank, "\(card.bankName)(\(card.tail))") }
+                        }
+                        Button("不调整余额") { changeAccount(.unknown, "") }
+                    } label: {
+                        detailRow("支付方式", paymentLabel, symbol: "creditcard.fill")
+                    }
+                    .buttonStyle(.plain)
 
                     Divider().padding(.leading, 16)
 
@@ -651,6 +628,10 @@ struct EntryDetailView: View {
                 }
 
                 if entry.needsReview {
+                    Text(entry.reviewExplanation)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     Button {
                         entry.needsReview = false
                         store.update(entry)
@@ -696,6 +677,12 @@ struct EntryDetailView: View {
         .sheet(isPresented: _showCategoryManager.projectedValue) { CategoryManageView(initialKind: entry.kind) }
     }
 
+    private func changeAccount(_ channel: PayChannel, _ account: String) {
+        entry.channel = channel
+        entry.account = account
+        store.update(entry)
+    }
+
     /// 支付方式：微信余额 / 支付宝余额 / 招商银行4926 / 花呗 …
     private var paymentLabel: String {
         let tail: String = {
@@ -735,7 +722,6 @@ struct EntryDetailView: View {
             get: { entry.merchant },
             set: {
                 entry.merchant = $0
-                entry.needsReview = $0.isEmpty
                 store.update(entry)
             }
         )

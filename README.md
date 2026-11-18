@@ -18,6 +18,14 @@
 
 收入与支出分别统计；收入增加已识别账户余额，删除收入撤回对应增加。手工录入选择「不指定账户」时只记收支、不调整余额。退款至信用卡不会当作储蓄卡现金余额增加。
 
+## 本人账户流转与余额核对（v1.5.0）
+
+余额页可选择本人转出、转入账户，记录到账金额与手续费，同步调整两端余额。明确账户、交易单号且无手续费歧义的提现/充值可自动处理，其他资金流动保留待核对。内部流转不计收支，手续费单独留存在流转记录中。
+
+新增余额与账单核对：首次升级以现有余额建立基准，运行期间每分钟及返回前台时检查差异。发现异常后先核对真实余额和账单，再手动修改并确认新基准；不推测历史期初余额，不承诺杀后台后持续检查。
+
+待确认列表与首页共用实时查询，显示核对原因；修改分类或商户不再自动确认，需点击「确认这笔」。修复多卡余额合计误写回第一张卡、负余额截零及重复删除退款问题。后台执行限制与真机验收清单见 [v1.5.0 更新说明](docs/releases/v1.5.0.md)。
+
 ## 自定义分类
 
 「我的 → 自定义分类」、记一笔的分类区和详情分类菜单均可管理自定义收入/支出分类。可添加、删除，同类型不能重名。删除后不再用于新账目，历史名称和统计保留；同步删除记录防止旧备份复活已删分类。
@@ -31,7 +39,7 @@
 
 ## 安装与 SideStore
 
-从 [Releases](https://github.com/callum-albert/7_Bookkeeping/releases) 的 **Assets** 下载 `7jizhang-<版本号>.ipa`（例如 `7jizhang-1.4.6.ipa`），不要导入 Source code.zip。主 App 与灵动岛扩展都需要重新签名；发布包为 ad-hoc 构建，安装前仍需自己的开发者签名或支持的侧载工具。
+从 [Releases](https://github.com/callum-albert/7_Bookkeeping/releases) 的 **Assets** 下载 `7jizhang-<版本号>.ipa`（例如 `7jizhang-1.5.0.ipa`），不要导入 Source code.zip。主 App 与灵动岛扩展都需要重新签名；发布包为 ad-hoc 构建，安装前仍需自己的开发者签名或支持的侧载工具。
 
 新版用最基础的 ZIP Stored（不压缩）格式打包，避免依赖侧载工具的 deflate 解码路径。构建时逐项检查 ZIP 本地头、中央目录、CRC、可执行文件和 Bundle Identifier，并对主程序和扩展做严格签名校验。包较旧版更大属正常现象。
 
@@ -45,14 +53,14 @@
 bash tools/test.sh
 ```
 
-输出 `build/7jizhang.ipa` 和工作区根目录的 `7记账.ipa`。在本机临时目录完成编译、签名与打包，避免 iCloud 给 .app 添加扩展属性造成签名失败。
+输出 `build/7jizhang-<版本号>.ipa` 和工作区根目录的 `7记账-<版本号>.ipa`。在本机临时目录完成编译、签名与打包，避免 iCloud 给 .app 添加扩展属性造成签名失败。
 
 真实图片验收与 App 复用相同 OCR 管线：
 
 ```bash
 bash tools/test_images.sh --output /tmp/results.json \
   --expected /tmp/expected.json /path/to/private-receipt.HEIC
-python3 tools/verify_ipa.py build/7jizhang.ipa
+python3 tools/verify_ipa.py build/7jizhang-1.5.0.ipa
 ```
 
 原来的8张真实微信账单图仍保持8/8图片、72/72字段匹配。收入、退款、自定义分类和新卡登记另外做模拟文本及存储回归；未获得真实收入/退款原图，不能声称其图片准确率100%。图片、期望值、私人报告均不提交公开仓库。iPhone 布局及 SideStore 实际安装仍需设备验收。

@@ -169,6 +169,8 @@ final class BackupService {
         // 新装设备首次恢复时，把余额也带过来
         if wasEmpty, !payload.balances.isEmpty {
             Accounts.shared.importBalances(payload.balances)
+            if let cards = payload.bankCards { Accounts.shared.restoreCards(cards) }
+            LedgerStore.shared.confirmBalanceBaseline()
         }
 
         lastSyncAt = Date()

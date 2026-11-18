@@ -11,6 +11,10 @@ struct BalanceManageView: View {
     private var _alipay = State(wrappedValue: "")
     private var alipay: String { get { _alipay.wrappedValue } nonmutating set { _alipay.wrappedValue = newValue } }
 
+    private var _walletInitial = State(wrappedValue: [String: Int]())
+    private var _showTransfer = State(wrappedValue: false)
+    private var showTransfer: Bool { get { _showTransfer.wrappedValue } nonmutating set { _showTransfer.wrappedValue = newValue } }
+
     private var _adding = State(wrappedValue: false)
     private var adding: Bool { get { _adding.wrappedValue } nonmutating set { _adding.wrappedValue = newValue } }
     private var _newBank = State(wrappedValue: "")
@@ -26,6 +30,9 @@ struct BalanceManageView: View {
         ScrollView {
             VStack(spacing: 16) {
                 totalCard
+                NavigationLink("余额与账单核对") { BalanceAuditView() }
+                Button("本人账户转账 / 提现 / 充值") { showTransfer = true }
+                    .buttonStyle(.bordered)
                 walletSection
                 cardSection
                 hint
@@ -39,12 +46,21 @@ struct BalanceManageView: View {
         .navigationTitle("余额")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            _walletInitial.wrappedValue = ["wechat": accounts.wechat, "alipay": accounts.alipay]
             wechat = accounts.wechat == 0 ? "" : plain(accounts.wechat)
             alipay = accounts.alipay == 0 ? "" : plain(accounts.alipay)
         }
         .onDisappear {
-            accounts.setAll(wechat: cents(wechat), alipay: cents(alipay), bank: accounts.bankTotal)
+            // 只更新实际编辑过的钱包；绝不能把银行卡合计写回第一张卡。
+            if cents(wechat) != _walletInitial.wrappedValue["wechat"] {
+                accounts.setBalance(cents(wechat), for: .wechat)
+            }
+            if cents(alipay) != _walletInitial.wrappedValue["alipay"] {
+                accounts.setBalance(cents(alipay), for: .alipay)
+            }
+            LedgerStore.shared.checkBalances()
         }
+        .sheet(isPresented: _showTransfer.projectedValue) { TransferView() }
         .sheet(item: Binding(get: { editingCard }, set: { editingCard = $0 })) { card in
             EditCardSheet(card: card) { updated in
                 accounts.updateCard(updated)
