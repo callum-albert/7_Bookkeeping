@@ -136,6 +136,11 @@ final class LedgerStore {
         }
         var repaired = false
         for index in entries.indices {
+            // 取消用户账单确认流程；旧字段仅为解码历史快照保留。
+            if entries[index].needsReview {
+                entries[index].needsReview = false
+                repaired = true
+            }
             let old = entries[index].merchant
             // 老版本 raw 可能只保存字段区，不含顶部金额；使用已存金额辅助解析，不修改金额。
             let reparsedText = entries[index].raw + "\n金额 " + entries[index].amountCents.moneyText
@@ -200,7 +205,7 @@ final class LedgerStore {
                     return .ignored("本人账户转账已调整两端余额，不计入收支")
                 }
             }
-            let reason = "资金流动待核对：请在余额页指定转出和转入账户"
+            let reason = "资金流动未匹配到账户：请通过异常提示核对"
             recordIgnored(p, reason: reason)
             return .ignored(reason)
         }
@@ -284,7 +289,7 @@ final class LedgerStore {
             raw: p.raw,
             auto: true,
             account: p.account,
-            needsReview: p.needsReview,
+            needsReview: false,
             channel: p.channel,
             hasPaidTime: p.hasPaidTime, product: p.product, transactionID: p.transactionID, kind: p.kind
         )
@@ -313,7 +318,6 @@ final class LedgerStore {
 
     /// 合并两个渠道的同一笔消费，保留信息更全的一方
     private func merge(_ e: inout Entry, with p: BillParser.Parsed) {
-        let wasReview = e.needsReview
         // 交易时间取更早的（通知可能延迟）；任一方是真实支付时间就采用
         if p.hasPaidTime && !e.hasPaidTime {
             e.date = p.date
@@ -354,9 +358,7 @@ final class LedgerStore {
             e.raw = e.raw.isEmpty ? p.raw : e.raw + "\n" + p.raw
         }
 
-        // 商户仍然只是来源名 → 仍需确认
-        e.needsReview = (newIsConcrete && p.source != .bank ? p.needsReview : wasReview)
-            || e.merchant.isEmpty || e.merchant == e.source.title || (e.source == .bank && e.merchant.count < 2)
+        e.needsReview = false
     }
 
     /// 信息是否模糊（没有可用商户名，或来自银行短信）
@@ -477,6 +479,7 @@ final class LedgerStore {
     // MARK: - CRUD
     func add(_ entry: Entry) {
         var e = entry
+        e.needsReview = false
         e.updatedAt = Date()
         registerCard(account: e.account, channel: e.channel)
         applyBalance(e)
@@ -489,6 +492,7 @@ final class LedgerStore {
     func update(_ entry: Entry) {
         guard let i = entries.firstIndex(where: { $0.id == entry.id }) else { return }
         var e = entry
+        e.needsReview = false
         e.updatedAt = Date()
         let old = entries[i]
         if old.amountCents != e.amountCents || old.kind != e.kind || old.channel != e.channel || old.account != e.account {
@@ -559,7 +563,8 @@ final class LedgerStore {
         var byID = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0) })
         var added = 0, updated = 0
 
-        for remote in payload.entries {
+        for var remote in payload.entries {
+            remote.needsReview = false
             if tomb.contains(remote.id) { continue }
             if let local = byID[remote.id] {
                 if remote.updatedAt > local.updatedAt {
@@ -591,8 +596,6 @@ final class LedgerStore {
         return (added, updated, removed)
     }
 
-
-    var pendingReview: [Entry] { entries.filter(\.needsReview).sorted { $0.date > $1.date } }
 
     // MARK: - 统计
     struct Summary {

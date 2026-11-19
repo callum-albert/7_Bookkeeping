@@ -12,8 +12,6 @@ struct HomeView: View {
     private var _photoItem = State<PhotosPickerItem?>(wrappedValue: nil)
     private var photoItem: PhotosPickerItem? { get { _photoItem.wrappedValue } nonmutating set { _photoItem.wrappedValue = newValue } }
     private var _showPasteSheet = State(wrappedValue: false)
-    private var _showReviewSheet = State(wrappedValue: false)
-    private var showReviewSheet: Bool { get { _showReviewSheet.wrappedValue } nonmutating set { _showReviewSheet.wrappedValue = newValue } }
     private var showPasteSheet: Bool { get { _showPasteSheet.wrappedValue } nonmutating set { _showPasteSheet.wrappedValue = newValue } }
     private var _pasteText = State(wrappedValue: "")
     private var pasteText: String { get { _pasteText.wrappedValue } nonmutating set { _pasteText.wrappedValue = newValue } }
@@ -24,38 +22,6 @@ struct HomeView: View {
 
     init(showCompose: Binding<Bool>) {
         _showCompose = showCompose
-    }
-
-    private var pendingReview: [Entry] {
-        store.pendingReview
-    }
-
-    private var reviewBanner: some View {
-        Button {
-            showReviewSheet = true
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.warm)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(pendingReview.count) 笔待确认")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text("点开账目核对后，点「确认这笔」即可消除提醒")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .glassEffect(.regular.tint(Theme.warm.opacity(0.16)).interactive(), in: .rect(cornerRadius: 18))
-        }
-        .buttonStyle(.plain)
     }
 
     private var today: DateInterval { Period.day.range() }
@@ -95,7 +61,6 @@ struct HomeView: View {
                     if !store.ignored.isEmpty {
                         NavigationLink("\(store.ignored.count) 条资金流动待核对") { IgnoredListView() }
                     }
-                    if !pendingReview.isEmpty { reviewBanner }
                     quickActions
                     listSection
                     Color.clear.frame(height: 90)
@@ -124,7 +89,6 @@ struct HomeView: View {
             }
         }
         .sheet(isPresented: _showPasteSheet.projectedValue) { pasteSheet }
-        .sheet(isPresented: _showReviewSheet.projectedValue) { ReviewListView() }
     }
 
     // MARK: - 头部
@@ -447,14 +411,6 @@ struct EntryRow: View {
                             .foregroundStyle(.primary)
                             .lineLimit(nil)
                             .fixedSize(horizontal: false, vertical: true)
-                        if entry.needsReview {
-                            Text("待确认")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(Theme.warm)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background(Theme.warm.opacity(0.16), in: .capsule)
-                        }
                         if entry.channel.isCredit {
                             Text(entry.channel == .huabei ? "花呗" : "信用卡")
                                 .font(.system(size: 9, weight: .bold))
@@ -479,9 +435,9 @@ struct EntryRow: View {
                         .foregroundStyle(.primary)
                         .monospacedDigit()
                     if entry.auto {
-                        Text(entry.needsReview ? "待确认" : (entry.mergedSources.isEmpty ? "自动" : "已合并"))
+                        Text(entry.mergedSources.isEmpty ? "自动" : "已合并")
                             .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(entry.needsReview ? Theme.warm : Theme.mint)
+                            .foregroundStyle(Theme.mint)
                     }
                 }
             }
@@ -625,25 +581,6 @@ struct EntryDetailView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 9)
-                }
-
-                if entry.needsReview {
-                    Text(entry.reviewExplanation)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Button {
-                        entry.needsReview = false
-                        store.update(entry)
-                        dismiss()
-                    } label: {
-                        Label("确认这笔", systemImage: "checkmark.circle.fill")
-                            .font(.system(size: 15, weight: .semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .glassEffect(.regular.tint(Theme.mint.opacity(0.2)).interactive(), in: .rect(cornerRadius: 18))
-                    }
-                    .buttonStyle(.plain)
                 }
 
                 Button {

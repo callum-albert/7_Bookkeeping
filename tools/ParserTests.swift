@@ -57,7 +57,7 @@ let b1 = parse1("【招商银行】您尾号1234的账户于11月14日12:30消�
 check("银行消费短信金额", b1?.amountCents == 2500, "\(String(describing: b1))")
 check("银行短信 → 银行来源", b1?.source == .bank, "\(String(describing: b1?.source))")
 check("银行短信提取卡尾号", (b1?.account ?? "").contains("1234"), "\(String(describing: b1?.account))")
-check("银行短信标记待确认", b1?.needsReview == true && b1?.flow == .expense, "\(String(describing: b1))")
+check("银行短信保留内部识别置信度",  b1?.needsReview == true && b1?.flow == .expense, "\(String(describing: b1))")
 
 let b2 = parse1("您尾号5678的信用卡11月14日在星巴克消费32.00元")
 check("银行短信带商户", b2?.merchant == "星巴克" && b2?.amountCents == 3200, "\(String(describing: b2))")
@@ -624,7 +624,7 @@ reviewB.needsReview = true
 let beforeReview = reviewStore.entries.count
 _ = reviewStore.ingest(reviewA)
 _ = reviewStore.ingest(reviewB)
-check("待确认的不同商户不误合并", reviewStore.entries.count == beforeReview + 2)
+check("低置信度的不同商户不误合并",  reviewStore.entries.count == beforeReview + 2)
 var otherPlatform = reviewA
 otherPlatform.source = .alipay
 _ = reviewStore.ingest(otherPlatform)
@@ -820,17 +820,28 @@ editable.amountCents = 1000
 editable.channel = .alipayBalance
 auditStore.update(editable)
 check("修改金额及账户正确还原旧余额", acct.wechat == 6990 && acct.alipay == 22000)
-check("待确认查询包含旧日期账目", auditStore.pendingReview.contains { $0.id == editable.id })
+check("信息不全的账目直接入账且不要求确认", auditStore.entries.contains { $0.id == editable.id && !$0.needsReview })
 editable.needsReview = false
 auditStore.update(editable)
-check("显式确认同步移除提醒", !auditStore.pendingReview.contains { $0.id == editable.id })
+check("编辑账目不会创建确认状态", auditStore.entries.first { $0.id == editable.id }?.needsReview == false)
 auditStore.delete(editable)
 auditStore.delete(editable)
 check("重复删除不会多退余额", acct.wechat == 6990 && acct.alipay == 23000)
 acct.setBalance(9999, for: .wechat)
 auditStore.checkBalances()
-check("手动余额差异保留待确认", auditStore.balanceWarnings.contains { $0.contains("差额") })
+check("手动余额差异保留异常提示",  auditStore.balanceWarnings.contains { $0.contains("差额") })
+// 模拟旧版本已落盘的待确认状态，升级后必须清除且不改变账单或余额。
+var legacyEntries = auditStore.entries
+legacyEntries[0].needsReview = true
+try! JSONEncoder().encode(legacyEntries).write(to: LedgerStore.storageDirectory.appendingPathComponent("ledger.json"))
+let beforeMigrationBalance = acct.total
 let auditReload = LedgerStore()
+check("升级清除旧账单确认状态且不改变余额", auditReload.entries.allSatisfy { !$0.needsReview } && acct.total == beforeMigrationBalance)
+var remoteReviewEntry = Entry(amountCents: 55, date: Date(), category: .other, merchant: "旧备份测试", source: .bank, needsReview: true)
+var reviewPayload = auditReload.exportPayload()
+reviewPayload.entries = [remoteReviewEntry]
+_ = auditReload.mergeRemote(reviewPayload)
+check("旧备份不会恢复账单确认机制", auditReload.entries.first { $0.id == remoteReviewEntry.id }?.needsReview == false)
 check("冷启动恢复转账及差异基准", auditReload.transfers.contains { $0.reference == "test-transfer" } && !auditReload.balanceWarnings.isEmpty)
 auditReload.confirmBalanceBaseline()
 check("核对后新基准清除差异", auditReload.balanceWarnings.isEmpty)

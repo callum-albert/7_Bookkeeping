@@ -12,8 +12,6 @@ struct BalanceManageView: View {
     private var alipay: String { get { _alipay.wrappedValue } nonmutating set { _alipay.wrappedValue = newValue } }
 
     private var _walletInitial = State(wrappedValue: [String: Int]())
-    private var _showTransfer = State(wrappedValue: false)
-    private var showTransfer: Bool { get { _showTransfer.wrappedValue } nonmutating set { _showTransfer.wrappedValue = newValue } }
 
     private var _adding = State(wrappedValue: false)
     private var adding: Bool { get { _adding.wrappedValue } nonmutating set { _adding.wrappedValue = newValue } }
@@ -30,9 +28,18 @@ struct BalanceManageView: View {
         ScrollView {
             VStack(spacing: 16) {
                 totalCard
-                NavigationLink("余额与账单核对") { BalanceAuditView() }
-                Button("本人账户转账 / 提现 / 充值") { showTransfer = true }
-                    .buttonStyle(.bordered)
+                if !LedgerStore.shared.balanceWarnings.isEmpty {
+                    NavigationLink { BalanceAuditView() } label: {
+                        Label("余额与账单存在差异，请核对", systemImage: "exclamationmark.triangle")
+                            .font(.subheadline)
+                    }
+                }
+                if !LedgerStore.shared.ignored.isEmpty {
+                    NavigationLink { IgnoredListView() } label: {
+                        Label("有资金流动未匹配到账户，请核对", systemImage: "exclamationmark.triangle")
+                            .font(.subheadline)
+                    }
+                }
                 walletSection
                 cardSection
                 hint
@@ -60,7 +67,6 @@ struct BalanceManageView: View {
             }
             LedgerStore.shared.checkBalances()
         }
-        .sheet(isPresented: _showTransfer.projectedValue) { TransferView() }
         .sheet(item: Binding(get: { editingCard }, set: { editingCard = $0 })) { card in
             EditCardSheet(card: card) { updated in
                 accounts.updateCard(updated)
